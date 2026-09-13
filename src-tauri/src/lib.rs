@@ -2,10 +2,10 @@ use std::fs;
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// Emby Theater TV web client. Startup parameters are supplied through the
-/// injected `window.appStartInfo` string (runs before page scripts), and the
-/// app is started explicitly via `Emby.App.start` once it is available.
-const EMBY_URL: &str = "https://tv.emby.media";
+/// Emby Theater TV web client with autostart disabled; startup parameters are
+/// supplied through the injected `window.appStartInfo` object (runs before page
+/// scripts), and the app is started explicitly via `Emby.App.start`.
+const EMBY_URL: &str = "https://tv.emby.media/index.html?autostart=false";
 
 /// Return the Emby application URL so the frontend (or other code) can use it.
 #[tauri::command]
