@@ -196,9 +196,13 @@ const SERVER_DISCOVERY_JS: &str = r#"define(function () {
 /// Host apphost module: wraps the client's built-in apphost and enables the
 /// `exit` capability, which the web apphost only reports on native LG/Tizen.
 /// With it the TV client shows its "are you ready to exit" back menu on Esc
-/// instead of having no way to quit. The built-in is loaded as an AMD
-/// dependency so the wrapper is complete before the client uses it.
-const APPHOST_JS: &str = r#"define(["/modules/apphost.js"], function (mod) {
+/// instead of having no way to quit.
+///
+/// The dependency id must match the one the client itself uses
+/// (`importFromPath("./modules/apphost.js")` normalizes to `modules/apphost.js`);
+/// a leading slash would create a second instance whose servicelocator was never
+/// initialized, and appHost.init() would reject, leaving the splash screen up.
+const APPHOST_JS: &str = r#"define(["modules/apphost.js"], function (mod) {
   var inner = mod && mod.default ? mod.default : mod;
   var baseSupports = inner.supports;
   inner.supports = function (feature) {
