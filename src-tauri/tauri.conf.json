@@ -7,19 +7,7 @@
     "frontendDist": "../ui"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Emby Theater",
-        "url": "https://app.emby.media",
-        "width": 1280,
-        "height": 720,
-        "minWidth": 960,
-        "minHeight": 540,
-        "resizable": true,
-        "fullscreen": false,
-        "center": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
