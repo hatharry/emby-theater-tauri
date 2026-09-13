@@ -8,7 +8,11 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 /// Emby Theater TV web client with autostart disabled; startup parameters are
 /// supplied through the injected `window.appStartInfo` object (runs before page
 /// scripts), and the app is started explicitly via `Emby.App.start`.
-const EMBY_URL: &str = "https://tv.emby.media/index.html?autostart=false";
+///
+/// Loaded over HTTP (as the official Theater desktop apps do) so connecting to a
+/// plain-HTTP Emby Server on the LAN is not blocked as mixed content; WebKitGTK
+/// exposes no mixed-content setting.
+const EMBY_URL: &str = "http://tv.emby.media/index.html?autostart=false";
 
 /// Return the Emby application URL so the frontend (or other code) can use it.
 #[tauri::command]
