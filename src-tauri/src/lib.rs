@@ -2,9 +2,10 @@ use std::fs;
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// Emby web client with autostart disabled; startup parameters are supplied
-/// through the injected `window.appStartInfo` object (runs before page scripts).
-const EMBY_URL: &str = "https://app.emby.media/index.html?autostart=false";
+/// Emby Theater TV web client. Startup parameters are supplied through the
+/// injected `window.appStartInfo` string (runs before page scripts), and the
+/// app is started explicitly via `Emby.App.start` once it is available.
+const EMBY_URL: &str = "https://tv.emby.media";
 
 /// Return the Emby application URL so the frontend (or other code) can use it.
 #[tauri::command]
@@ -44,9 +45,8 @@ pub fn run() {
             let did = device_id(&handle);
 
             // Injected before any page script runs, so the Emby app sees
-            // window.appStartInfo on first load (it waits for it because
-            // autostart=false). Once the page's Emby.App is ready, we start
-            // the app ourselves with the injected info.
+            // window.appStartInfo on first load. Once the page's Emby.App is
+            // ready, we start the app ourselves with the injected info.
             let start_info = format!(
                 r#"window.appStartInfo = Object.assign({{
   environment: "emby-theater",
