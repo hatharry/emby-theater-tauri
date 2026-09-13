@@ -45,7 +45,8 @@ pub fn run() {
 
             // Injected before any page script runs, so the Emby app sees
             // window.appStartInfo on first load (it waits for it because
-            // autostart=false).
+            // autostart=false). Once the page's Emby.App is ready, we start
+            // the app ourselves with the injected info.
             let start_info = format!(
                 r#"window.appStartInfo = Object.assign({{
   environment: "emby-theater",
@@ -59,7 +60,14 @@ pub fn run() {
   canQuit: true,
   devToolsEnabled: true,
   supportedCommands: [],
-}}, window.appStartInfo || {{}});"#
+}}, window.appStartInfo || {{}});
+(function startEmby() {{
+  if (window.Emby && window.Emby.App && typeof window.Emby.App.start === "function") {{
+    window.Emby.App.start(window.appStartInfo);
+  }} else {{
+    setTimeout(startEmby, 50);
+  }}
+}})();"#
             );
 
             let _window = WebviewWindowBuilder::new(
