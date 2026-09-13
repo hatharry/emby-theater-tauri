@@ -1,0 +1,10 @@
+[Desktop Entry]
+Categories=AudioVideo;Player;TV;
+Exec={{exec}}
+Name={{name}}
+StartupWMClass=embytheater
+Terminal=false
+Type=Application
+Icon={{icon}}
+Comment={{comment}}
+Keywords=emby;media;tv;streaming;
