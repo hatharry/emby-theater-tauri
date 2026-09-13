@@ -337,6 +337,7 @@ pub fn run() {
             .inner_size(1280.0, 720.0)
             .min_inner_size(960.0, 540.0)
             .center()
+            .fullscreen(true)
             .initialization_script(&start_info)
             .build()?;
 
