@@ -1,7 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main Emby window",
+  "description": "Capabilities for the main Emby window (remote URL)",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default"],
+  "remote": {
+    "urls": ["https://tv.emby.media/*"]
+  }
 }
