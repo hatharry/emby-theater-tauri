@@ -92,13 +92,12 @@ async fn discover_servers() -> Vec<serde_json::Value> {
         .unwrap_or_default()
 }
 
-/// Replaces the web client's no-op serverDiscovery service (browsers cannot
-/// UDP broadcast) with one that calls our native `discover_servers` command.
-/// servicelocator.initialize() assigns the no-op during app start, so we keep
-/// re-asserting our implementation whenever the module holds something else.
-const DISCOVERY_JS: &str = r#"
-(function () {
-  var ours = {
+/// AMD module served over the `embyhost://` custom protocol and referenced from
+/// `appStartInfo.paths.serverdiscovery`. The client's loader resolves it instead
+/// of its built-in no-op discovery module (browsers cannot UDP broadcast), and
+/// it calls our native `discover_servers` command.
+const SERVER_DISCOVERY_JS: &str = r#"define(function () {
+  return {
     findServers: function () {
       try {
         return window.__TAURI_INTERNALS__.invoke("discover_servers");
@@ -107,19 +106,7 @@ const DISCOVERY_JS: &str = r#"
       }
     },
   };
-  function assert() {
-    if (typeof require !== "function") return;
-    try {
-      require(["./modules/common/servicelocator.js"], function (sl) {
-        if (sl && sl.serverDiscovery !== ours) {
-          sl.serverDiscovery = ours;
-        }
-      });
-    } catch (e) {}
-  }
-  setInterval(assert, 100);
-  assert();
-})();
+});
 "#;
 
 /// Stable per-install device id, persisted in the app config directory.
@@ -146,6 +133,13 @@ fn device_id(app: &tauri::AppHandle) -> String {
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![emby_url, discover_servers])
+        .register_uri_scheme_protocol("embyhost", |_ctx, _req| {
+            tauri::http::Response::builder()
+                .header("content-type", "application/javascript")
+                .header("access-control-allow-origin", "*")
+                .body(SERVER_DISCOVERY_JS.as_bytes().to_vec())
+                .unwrap()
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             let version = app.package_info().version.to_string();
@@ -169,6 +163,7 @@ pub fn run() {
   canQuit: true,
   devToolsEnabled: true,
   supportedCommands: [],
+  paths: {{ serverdiscovery: "embyhost://host/serverdiscovery.js" }},
 }}, window.appStartInfo || {{}});
 (function startEmby() {{
   if (window.Emby && window.Emby.App && typeof window.Emby.App.start === "function") {{
@@ -176,8 +171,7 @@ pub fn run() {
   }} else {{
     setTimeout(startEmby, 50);
   }}
-}})();
-{DISCOVERY_JS}"#
+}})();"#
             );
 
             let _window = WebviewWindowBuilder::new(

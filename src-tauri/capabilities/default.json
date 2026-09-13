@@ -3,7 +3,7 @@
   "identifier": "default",
   "description": "Capabilities for the main Emby window (remote URL)",
   "windows": ["main"],
-  "permissions": ["core:default"],
+  "permissions": ["core:default", "allow-discover-servers"],
   "remote": {
     "urls": ["https://tv.emby.media/*"]
   }
