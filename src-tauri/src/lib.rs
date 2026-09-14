@@ -271,6 +271,27 @@ fn device_id(app: &tauri::AppHandle) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK + NVIDIA: the first accelerated-compositing trigger on a page
+    // (e.g. the TV client's page-transition animation when a menu item is
+    // clicked) segfaults the UI process on a null AcceleratedBackingStore —
+    // "segfault at 48" (bugs.webkit.org #321683, block/buzz #3654).
+    // WEBKIT_DMABUF_RENDERER_FORCE_SHM routes the renderer through shared
+    // memory and keeps the backing store valid (unlike the old
+    // WEBKIT_DISABLE_DMABUF_RENDERER, which empties the transport set and
+    // causes exactly this crash). Ubuntu's libwebkit2gtk additionally ships a
+    // disable-nvidia-dmabuf patch that bails out before the SHM mode is
+    // added, so its own opt-out (WEBKIT_FORCE_DMABUF_RENDERER) must be set
+    // alongside for FORCE_SHM to take effect. Set before the webview spawns
+    // so all helper processes inherit them; respect pre-set values.
+    for (var, value) in [
+        ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"),
+        ("WEBKIT_FORCE_DMABUF_RENDERER", "1"),
+    ] {
+        if std::env::var_os(var).is_none() {
+            std::env::set_var(var, value);
+        }
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             emby_url,
