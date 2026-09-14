@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Emby Theater",
+  "productName": "emby-theater",
   "version": "0.1.0",
   "identifier": "tv.emby.theater.tauri",
+  "mainBinaryName": "emby-theater",
   "build": {
     "frontendDist": "../ui"
   },

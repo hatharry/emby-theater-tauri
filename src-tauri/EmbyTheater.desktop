@@ -1,8 +1,8 @@
 [Desktop Entry]
 Categories=AudioVideo;Player;TV;
 Exec={{exec}}
-Name={{name}}
-StartupWMClass=embytheater
+Name=Emby Theater
+StartupWMClass=emby-theater
 Terminal=false
 Type=Application
 Icon={{icon}}
