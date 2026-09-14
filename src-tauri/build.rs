@@ -7,6 +7,7 @@ fn main() {
                 "discover_servers",
                 "wake_on_lan",
                 "quit_app",
+                "set_layout_mode",
             ]),
         ),
     )

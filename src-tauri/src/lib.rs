@@ -217,11 +217,6 @@ const APPHOST_JS: &str = r#"define(["modules/apphost.js"], function (mod) {
     }
     return Promise.resolve();
   };
-  // Force the TV layout: the back menu only lists "Exit" when the client is in
-  // tv layout, and a desktop-sized window is otherwise detected as desktop.
-  inner.getDefaultLayout = function () {
-    return "tv";
-  };
   return inner;
 });
 "#;
@@ -269,6 +264,43 @@ fn device_id(app: &tauri::AppHandle) -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
+/// The client's view-mode setting ("tv" or "normal"), persisted at startup by
+/// the init script. Defaults to "normal": with no stored choice, the client's
+/// own auto-detection resolves to the desktop/mobile layout, which runs in a
+/// normal window.
+fn saved_layout_mode(app: &tauri::AppHandle) -> String {
+    if let Ok(dir) = app.path().app_config_dir() {
+        if let Ok(txt) = fs::read_to_string(dir.join("layout.json")) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
+                if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
+                    return mode.to_string();
+                }
+            }
+        }
+    }
+    "normal".to_string()
+}
+
+/// Called by the init script on every page load with the client's persisted
+/// view mode: remembers it for the next launch and applies it immediately if
+/// the user changed it in settings (tv layout -> fullscreen window).
+#[tauri::command]
+fn set_layout_mode(app: tauri::AppHandle, mode: String) {
+    if let Ok(dir) = app.path().app_config_dir() {
+        let _ = fs::create_dir_all(&dir);
+        let _ = fs::write(
+            dir.join("layout.json"),
+            serde_json::json!({ "mode": mode }).to_string(),
+        );
+    }
+    let fullscreen = mode != "normal";
+    if let Some(w) = app.get_webview_window("main") {
+        if w.is_fullscreen().unwrap_or(!fullscreen) != fullscreen {
+            let _ = w.set_fullscreen(fullscreen);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK + NVIDIA: the first accelerated-compositing trigger on a page
@@ -300,7 +332,8 @@ pub fn run() {
             emby_url,
             discover_servers,
             wake_on_lan,
-            quit_app
+            quit_app,
+            set_layout_mode
         ])
         .register_uri_scheme_protocol("embyhost", |_ctx, req| {
             let body = match req.uri().path() {
@@ -320,6 +353,9 @@ pub fn run() {
             let device_name =
                 std::env::var("USER").unwrap_or_else(|_| "Emby Theater".to_string());
             let did = device_id(&handle);
+            // Start in the mode the user last chose in the client's settings
+            // (view mode "TV" -> fullscreen, anything else -> normal window).
+            let fullscreen = saved_layout_mode(&handle) != "normal";
 
             // Injected before any page script runs, so the Emby app sees
             // window.appStartInfo on first load. Once the page's Emby.App is
@@ -349,6 +385,33 @@ pub fn run() {
   }} else {{
     setTimeout(startEmby, 50);
   }}
+}})();
+// Report the client's persisted view mode (settings -> "View mode", stored by
+// layoutmanager as the "layout" key) so the window starts fullscreen for the
+// TV layout. Only an explicit "tv" counts: empty/auto resolves to the
+// desktop/mobile layout, which runs in a normal window.
+(function () {{
+  function send() {{
+    try {{
+      var l = localStorage.getItem("layout");
+      window.__TAURI_INTERNALS__.invoke("set_layout_mode", {{
+        mode: l === "tv" ? "tv" : "normal",
+      }});
+      return true;
+    }} catch (e) {{
+      return false;
+    }}
+  }}
+  if (!send()) setTimeout(send, 200);
+  // The settings page can change the view mode without a page reload; catch
+  // the write so the window state follows immediately. Must patch the
+  // prototype: assigning localStorage.setItem would just store an ITEM named
+  // "setItem" (Storage is an exotic object with a named-property setter).
+  var orig = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key, value) {{
+    orig.call(this, key, value);
+    if (key === "layout") send();
+  }};
 }})();"#
             );
 
@@ -361,7 +424,7 @@ pub fn run() {
             .inner_size(1280.0, 720.0)
             .min_inner_size(960.0, 540.0)
             .center()
-            .fullscreen(true)
+            .fullscreen(fullscreen)
             .initialization_script(&start_info)
             .build()?;
 
