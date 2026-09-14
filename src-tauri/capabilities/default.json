@@ -8,7 +8,8 @@
     "allow-discover-servers",
     "allow-wake-on-lan",
     "allow-quit-app",
-    "allow-set-layout-mode"
+    "allow-set-layout-mode",
+    "allow-cec-poll"
   ],
   "remote": {
     "urls": ["http://tv.emby.media/*"]

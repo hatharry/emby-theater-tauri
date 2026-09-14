@@ -1,6 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::net::UdpSocket;
+use std::process::Stdio;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
@@ -165,6 +168,114 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// CEC keypress queue: filled by the reader thread, drained by the page's
+/// inputmanager plugin (cec_poll).
+fn cec_queue() -> &'static Mutex<VecDeque<String>> {
+    static QUEUE: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+    QUEUE.get_or_init(Default::default)
+}
+
+/// Map a CEC UI command code to the client's inputmanager command name
+/// (same mapping as the official Emby Theater cec/command-map.js).
+fn cec_command(code: u8) -> Option<&'static str> {
+    Some(match code {
+        0x00 | 0x2B => "select",
+        0x01 => "up",
+        0x02 => "down",
+        0x03 => "left",
+        0x04 => "right",
+        0x09 => "menu",
+        0x0A => "settings",
+        0x0C => "favorites",
+        0x0D | 0x1D => "back",
+        0x10 => "channelup",
+        0x11 => "channeldown",
+        0x24 => "previous",
+        0x25 => "next",
+        0x37 => "pageup",
+        0x38 => "pagedown",
+        0x41 => "volumeup",
+        0x42 => "volumedown",
+        0x43 => "togglemute",
+        0x44 => "play",
+        0x45 => "stop",
+        0x46 => "pause",
+        0x47 => "record",
+        0x48 => "rewind",
+        0x49 => "fastforward",
+        0x4B => "next",
+        0x4C => "previous",
+        0x53 => "guide",
+        0x61 => "playpause",
+        _ => return None,
+    })
+}
+
+/// Run cec-client (from the cec-utils/libcec package) as a playback device and
+/// queue the UI commands the TV forwards from its remote. Restarts the client
+/// if it exits and retries periodically when no adapter is present, so
+/// plugging one in later works without relaunching.
+fn cec_reader_loop() {
+    loop {
+        match std::process::Command::new("cec-client")
+            .args(["-t", "playback1", "-d", "15", "-o", "EmbyTheater"])
+            .stdin(Stdio::piped()) // kept open: EOF would make cec-client exit
+            .stderr(Stdio::null())
+            .stdout(Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                let _stdin = child.stdin.take();
+                if let Some(out) = child.stdout.take() {
+                    for line in BufReader::new(out).lines() {
+                        let Ok(line) = line else { break };
+                        if let Some(cmd) = parse_cec_line(&line) {
+                            cec_queue()
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .push_back(cmd.to_string());
+                        }
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+        std::thread::sleep(Duration::from_secs(30));
+    }
+}
+
+/// Extract the inputmanager command from a cec-client output line. Handles
+/// both the decoded form (`... 'User Control Pressed' (0x44)`) and the raw
+/// traffic form (`>> 10:44:00` = <init:dest>:<opcode 44=press>:<keycode>).
+fn parse_cec_line(line: &str) -> Option<&'static str> {
+    if let Some(pos) = line.find("'User Control Pressed' (0x") {
+        let rest = &line[pos + 26..];
+        let code = u8::from_str_radix(rest.get(..2)?, 16).ok()?;
+        return cec_command(code);
+    }
+    if let Some(pos) = line.find(">> ") {
+        let mut it = line[pos + 3..].split(':');
+        let route = it.next()?.trim();
+        // First byte is (initiator << 4) | destination; remote keys come from
+        // the TV (0x0_) or an audio system (0x5_).
+        if !matches!(route.as_bytes().first(), Some(b'0') | Some(b'5')) {
+            return None;
+        }
+        if it.next()?.trim().eq_ignore_ascii_case("44") {
+            let code = u8::from_str_radix(it.next()?.trim(), 16).ok()?;
+            return cec_command(code);
+        }
+    }
+    None
+}
+
+/// Drain queued CEC keypresses for the page plugin.
+#[tauri::command]
+fn cec_poll() -> Vec<String> {
+    let mut q = cec_queue().lock().unwrap_or_else(|e| e.into_inner());
+    q.drain(..).collect()
+}
+
 #[tauri::command]
 async fn wake_on_lan(
     mac_address: String,
@@ -240,6 +351,45 @@ const WAKE_ON_LAN_JS: &str = r#"define(function () {
         return Promise.resolve(false);
       }
     },
+  };
+});
+"#;
+
+/// Host CEC plugin, loaded through `appStartInfo.plugins` (the same mechanism
+/// the official Theater apps use: the client does `new require(url)`). The
+/// constructor polls the native cec_poll queue and feeds the client's own
+/// inputmanager singleton, so TV remote keys drive navigation exactly like
+/// keyboard input. The dependency id must match the one the client itself
+/// resolves to (modules/common/inputmanager.js) or we would bind a second,
+/// uninitialized instance.
+const CEC_JS: &str = r#"define(["modules/common/inputmanager.js"], function (mod) {
+  var im = mod && mod.default ? mod.default : mod;
+  return function () {
+    this.id = "cecinput";
+    this.name = "cec";
+    this.type = "input";
+    var failures = 0;
+    function poll() {
+      try {
+        window.__TAURI_INTERNALS__.invoke("cec_poll").then(
+          function (keys) {
+            failures = 0;
+            for (var i = 0; i < keys.length; i++) {
+              try {
+                im.trigger(keys[i]);
+              } catch (e) {}
+            }
+            setTimeout(poll, 100);
+          },
+          function () {
+            if (++failures < 50) setTimeout(poll, 1000);
+          }
+        );
+      } catch (e) {
+        if (++failures < 50) setTimeout(poll, 1000);
+      }
+    }
+    poll();
   };
 });
 "#;
@@ -333,12 +483,14 @@ pub fn run() {
             discover_servers,
             wake_on_lan,
             quit_app,
-            set_layout_mode
+            set_layout_mode,
+            cec_poll
         ])
         .register_uri_scheme_protocol("embyhost", |_ctx, req| {
             let body = match req.uri().path() {
                 "/wakeonlan.js" => WAKE_ON_LAN_JS,
                 "/apphost.js" => APPHOST_JS,
+                "/cec.js" => CEC_JS,
                 _ => SERVER_DISCOVERY_JS,
             };
             tauri::http::Response::builder()
@@ -353,6 +505,7 @@ pub fn run() {
             let device_name =
                 std::env::var("USER").unwrap_or_else(|_| "Emby Theater".to_string());
             let did = device_id(&handle);
+            std::thread::spawn(cec_reader_loop);
             // Start in the mode the user last chose in the client's settings
             // (view mode "TV" -> fullscreen, anything else -> normal window).
             let fullscreen = saved_layout_mode(&handle) != "normal";
@@ -378,6 +531,7 @@ pub fn run() {
     wakeonlan: "embyhost://host/wakeonlan.js",
     apphost: "embyhost://host/apphost.js",
   }},
+  plugins: ["embyhost://host/cec.js"],
 }}, window.appStartInfo || {{}});
 (function startEmby() {{
   if (window.Emby && window.Emby.App && typeof window.Emby.App.start === "function") {{
@@ -457,6 +611,23 @@ pub fn run() {
 mod tests {
     use std::net::UdpSocket;
     use std::time::Duration;
+
+    #[test]
+    fn parses_cec_traffic_lines() {
+        // Decoded form.
+        assert_eq!(
+            super::parse_cec_line(
+                "TRAFFIC: [ 1] >> A:5 (0): [ 44 01], 'User Control Pressed' (0x01)"
+            ),
+            Some("up")
+        );
+        // Raw traffic form: initiator 0 (TV) -> destination 5, opcode 44.
+        assert_eq!(super::parse_cec_line(">> 05:44:41"), Some("volumeup"));
+        // Key release (opcode 45) and foreign initiators are ignored.
+        assert_eq!(super::parse_cec_line(">> 05:45:41"), None);
+        assert_eq!(super::parse_cec_line(">> 15:44:41"), None);
+        assert_eq!(super::parse_cec_line("current latency: 24 ms"), None);
+    }
 
     #[test]
     fn parses_mac_notations() {
