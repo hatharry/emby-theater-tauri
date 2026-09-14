@@ -362,6 +362,25 @@ pub fn run() {
             .initialization_script(&start_info)
             .build()?;
 
+            // Route window-manager closes (Alt+F4, swipe-away, session logout)
+            // through the same orderly app.exit() as the in-app Exit button.
+            // Destroying the window underneath WebKit races the GPU-process
+            // teardown and segfaults libnvidia-eglcore's worker threads
+            // (crash popups, no data loss); app.exit() tears the webview down
+            // first and exits cleanly.
+            {
+                use tauri::{Manager, WindowEvent};
+                if let Some(w) = handle.get_webview_window("main") {
+                    let app = handle.clone();
+                    w.on_window_event(move |event| {
+                        if let WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                            app.exit(0);
+                        }
+                    });
+                }
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
