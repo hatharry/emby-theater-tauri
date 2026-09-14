@@ -281,11 +281,14 @@ pub fn run() {
     // causes exactly this crash). Ubuntu's libwebkit2gtk additionally ships a
     // disable-nvidia-dmabuf patch that bails out before the SHM mode is
     // added, so its own opt-out (WEBKIT_FORCE_DMABUF_RENDERER) must be set
-    // alongside for FORCE_SHM to take effect. Set before the webview spawns
-    // so all helper processes inherit them; respect pre-set values.
+    // alongside for FORCE_SHM to take effect. WEBKIT_SKIA_ENABLE_CPU_RENDERING
+    // keeps Skia off the NVIDIA GL path entirely, which also avoids the
+    // driver's GPU-worker teardown segfault on exit. Set before the webview
+    // spawns so all helper processes inherit them; respect pre-set values.
     for (var, value) in [
         ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"),
         ("WEBKIT_FORCE_DMABUF_RENDERER", "1"),
+        ("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1"),
     ] {
         if std::env::var_os(var).is_none() {
             std::env::set_var(var, value);
