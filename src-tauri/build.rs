@@ -9,6 +9,7 @@ fn main() {
                 "quit_app",
                 "set_layout_mode",
                 "cec_poll",
+                "cec_set_hdmi_port",
             ]),
         ),
     )

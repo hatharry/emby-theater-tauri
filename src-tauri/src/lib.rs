@@ -211,22 +211,65 @@ fn cec_command(code: u8) -> Option<&'static str> {
     })
 }
 
+/// The HDMI port (physical address first octet) the user selected on the
+/// plugin's settings page; None = auto.
+fn cec_hdmi_port() -> &'static Mutex<Option<String>> {
+    static PORT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    PORT.get_or_init(Default::default)
+}
+
+/// The running cec-client, so a port change can kill it and make the reader
+/// loop respawn it with the new -p argument.
+fn cec_child() -> &'static Mutex<Option<std::process::Child>> {
+    static CHILD: OnceLock<Mutex<Option<std::process::Child>>> = OnceLock::new();
+    CHILD.get_or_init(Default::default)
+}
+
+/// Called by the CEC plugin (at startup and when the settings page saves) with
+/// the configured HDMI port (""/None = auto). Restarts cec-client on change.
+#[tauri::command]
+fn cec_set_hdmi_port(port: Option<String>) {
+    let port = port.filter(|p| !p.is_empty());
+    let changed = {
+        let mut g = cec_hdmi_port().lock().unwrap_or_else(|e| e.into_inner());
+        let changed = *g != port;
+        *g = port;
+        changed
+    };
+    if changed {
+        if let Some(child) = cec_child().lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            let _ = child.kill();
+        }
+    }
+}
+
 /// Run cec-client (from the cec-utils/libcec package) as a playback device and
 /// queue the UI commands the TV forwards from its remote. Restarts the client
 /// if it exits and retries periodically when no adapter is present, so
 /// plugging one in later works without relaunching.
 fn cec_reader_loop() {
     loop {
-        match std::process::Command::new("cec-client")
+        let port = cec_hdmi_port()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let mut builder = std::process::Command::new("cec-client");
+        builder
             .args(["-t", "playback1", "-d", "15", "-o", "EmbyTheater"])
             .stdin(Stdio::piped()) // kept open: EOF would make cec-client exit
             .stderr(Stdio::null())
-            .stdout(Stdio::piped())
-            .spawn()
-        {
+            .stdout(Stdio::piped());
+        if let Some(p) = &port {
+            // Physical address N.0.0.0 = the TV's HDMI input N.
+            builder.arg("-p").arg(p);
+        }
+        match builder.spawn() {
             Ok(mut child) => {
-                let _stdin = child.stdin.take();
-                if let Some(out) = child.stdout.take() {
+                let started = Instant::now();
+                let stdin = child.stdin.take();
+                let out = child.stdout.take();
+                *cec_child().lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+                if let Some(out) = out {
                     for line in BufReader::new(out).lines() {
                         let Ok(line) = line else { break };
                         if let Some(cmd) = parse_cec_line(&line) {
@@ -237,10 +280,15 @@ fn cec_reader_loop() {
                         }
                     }
                 }
+                let _ = stdin;
+                *cec_child().lock().unwrap_or_else(|e| e.into_inner()) = None;
+                // Exited almost immediately: no adapter -> back off; otherwise
+                // (e.g. killed for a port change) restart quickly.
+                let backoff = started.elapsed() < Duration::from_secs(3);
+                std::thread::sleep(Duration::from_secs(if backoff { 30 } else { 2 }));
             }
-            Err(_) => {}
+            Err(_) => std::thread::sleep(Duration::from_secs(30)),
         }
-        std::thread::sleep(Duration::from_secs(30));
     }
 }
 
@@ -368,6 +416,27 @@ const CEC_JS: &str = r#"define(["modules/common/inputmanager.js"], function (mod
     this.id = "cecinput";
     this.name = "cec";
     this.type = "input";
+    this.getRoutes = function () {
+      return [
+        {
+          path: "cec/cec.html",
+          transition: "slide",
+          controller: "embyhost://host/cec/cec.js",
+          type: "settings",
+          title: "HDMI-CEC",
+          category: "Playback",
+          thumbImage: "",
+          icon: "tv",
+          settingsTheme: true,
+          adjustHeaderForEmbeddedScroll: true,
+        },
+      ];
+    };
+    // Apply the saved HDMI port (if any) to the native reader at startup.
+    try {
+      var p = localStorage.getItem("cec-hdmiport") || "";
+      window.__TAURI_INTERNALS__.invoke("cec_set_hdmi_port", { port: p });
+    } catch (e) {}
     var failures = 0;
     function poll() {
       try {
@@ -392,6 +461,87 @@ const CEC_JS: &str = r#"define(["modules/common/inputmanager.js"], function (mod
     poll();
   };
 });
+"#;
+
+/// Settings page controller for the CEC plugin: renders/saves the HDMI port
+/// select and pushes the value to the native reader. Dependencies use path
+/// ids, not the bare ids the Electron app uses ("loading", "baseView", ...):
+/// the web client's alameda loader has no paths config, so bare ids would 404
+/// against the site root, while these normalize to the exact module instances
+/// the client itself uses.
+const CEC_PAGE_JS: &str = r#"define([
+  "modules/loading/loading.js",
+  "modules/viewmanager/baseview.js",
+  "modules/common/appsettings.js",
+  "modules/emby-elements/emby-select/emby-select.js",
+  "modules/emby-elements/emby-scroller/emby-scroller.js",
+], function (loading, BaseView, appSettings) {
+  // alameda hands the raw ES-module namespace to the factory; unwrap defaults.
+  loading = loading.default || loading;
+  BaseView = BaseView.default || BaseView;
+  appSettings = appSettings.default || appSettings;
+  function onSubmit(e) {
+    e.preventDefault();
+    return false;
+  }
+  function renderSettings(view) {
+    view.querySelector(".hdmiPort").value = appSettings.get("cec-hdmiport") || "";
+  }
+  function saveSettings(view) {
+    var port = view.querySelector(".hdmiPort").value;
+    if ((appSettings.get("cec-hdmiport") || "") !== port) {
+      appSettings.set("cec-hdmiport", port);
+      try {
+        window.__TAURI_INTERNALS__.invoke("cec_set_hdmi_port", { port: port });
+      } catch (e) {}
+    }
+  }
+  function SettingsView(view, params) {
+    BaseView.apply(this, arguments);
+    view.querySelector("form").addEventListener("submit", onSubmit);
+  }
+  Object.assign(SettingsView.prototype, BaseView.prototype);
+  SettingsView.prototype.onResume = function (options) {
+    BaseView.prototype.onResume.apply(this, arguments);
+    loading.hide();
+    if (options.refresh) {
+      renderSettings(this.view);
+    }
+  };
+  SettingsView.prototype.onPause = function () {
+    saveSettings(this.view);
+    BaseView.prototype.onPause.apply(this, arguments);
+  };
+  return SettingsView;
+});
+"#;
+
+/// Settings page markup for the CEC plugin, fetched by the router via its
+/// `text!` loader (the custom scheme is CORS-enabled by wry, so the XHR works).
+/// The root must carry class="view" (or data-role="page") — that is the
+/// element viewmanager extracts from the template.
+const CEC_PAGE_HTML: &str = r#"<div is="emby-scroller" class="view flex flex-direction-column scrollFrameY flex-grow" data-mousewheel="true" data-horizontal="false" data-forcescrollbar="true" data-centerfocus="card" data-bindheader="true">
+  <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
+    <form class="auto-center">
+      <div class="selectContainer">
+        <select is="emby-select" class="hdmiPort" label="HDMI port:">
+          <option value="">Auto</option>
+          <option>1</option>
+          <option>2</option>
+          <option>3</option>
+          <option>4</option>
+          <option>5</option>
+          <option>6</option>
+          <option>7</option>
+          <option>8</option>
+          <option>9</option>
+          <option>10</option>
+        </select>
+      </div>
+      <div class="fieldDescription">Select the HDMI input on your TV that this computer is connected to, so the TV remote's buttons reach the app over CEC. Leave on Auto to detect.</div>
+    </form>
+  </div>
+</div>
 "#;
 
 /// Stable per-install device id, persisted in the app config directory.
@@ -484,19 +634,22 @@ pub fn run() {
             wake_on_lan,
             quit_app,
             set_layout_mode,
-            cec_poll
+            cec_poll,
+            cec_set_hdmi_port
         ])
         .register_uri_scheme_protocol("embyhost", |_ctx, req| {
-            let body = match req.uri().path() {
-                "/wakeonlan.js" => WAKE_ON_LAN_JS,
-                "/apphost.js" => APPHOST_JS,
-                "/cec.js" => CEC_JS,
-                _ => SERVER_DISCOVERY_JS,
+            let (body, content_type) = match req.uri().path() {
+                "/wakeonlan.js" => (WAKE_ON_LAN_JS.as_bytes(), "application/javascript"),
+                "/apphost.js" => (APPHOST_JS.as_bytes(), "application/javascript"),
+                "/cec.js" => (CEC_JS.as_bytes(), "application/javascript"),
+                "/cec/cec.js" => (CEC_PAGE_JS.as_bytes(), "application/javascript"),
+                "/cec/cec.html" => (CEC_PAGE_HTML.as_bytes(), "text/html"),
+                _ => (SERVER_DISCOVERY_JS.as_bytes(), "application/javascript"),
             };
             tauri::http::Response::builder()
-                .header("content-type", "application/javascript")
+                .header("content-type", content_type)
                 .header("access-control-allow-origin", "*")
-                .body(body.as_bytes().to_vec())
+                .body(body.to_vec())
                 .unwrap()
         })
         .setup(|app| {
@@ -538,8 +691,7 @@ pub fn run() {
     window.Emby.App.start(window.appStartInfo);
   }} else {{
     setTimeout(startEmby, 50);
-  }}
-}})();
+  }}}})();
 // Report the client's persisted view mode (settings -> "View mode", stored by
 // layoutmanager as the "layout" key) so the window starts fullscreen for the
 // TV layout. Only an explicit "tv" counts: empty/auto resolves to the
@@ -569,7 +721,7 @@ pub fn run() {
 }})();"#
             );
 
-            let _window = WebviewWindowBuilder::new(
+            let window = WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::External(EMBY_URL.parse::<tauri::Url>().unwrap()),
@@ -581,6 +733,22 @@ pub fn run() {
             .fullscreen(fullscreen)
             .initialization_script(&start_info)
             .build()?;
+
+            // wry registers custom schemes as secure but NOT CORS-enabled, and
+            // the Emby client fetches plugin page HTML with XHR (its `text!`
+            // loader). Without this the request is blocked, the template comes
+            // back empty and viewmanager crashes before the controller runs.
+            #[cfg(target_os = "linux")]
+            {
+                use webkit2gtk::{SecurityManagerExt, WebContextExt, WebViewExt};
+                let _ = window.with_webview(|wv| {
+                    if let Some(ctx) = wv.inner().context() {
+                        if let Some(sm) = ctx.security_manager() {
+                            sm.register_uri_scheme_as_cors_enabled("embyhost");
+                        }
+                    }
+                });
+            }
 
             // Route window-manager closes (Alt+F4, swipe-away, session logout)
             // through the same orderly app.exit() as the in-app Exit button.

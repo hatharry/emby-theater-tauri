@@ -9,7 +9,8 @@
     "allow-wake-on-lan",
     "allow-quit-app",
     "allow-set-layout-mode",
-    "allow-cec-poll"
+    "allow-cec-poll",
+    "allow-cec-set-hdmi-port"
   ],
   "remote": {
     "urls": ["http://tv.emby.media/*"]
