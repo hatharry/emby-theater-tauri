@@ -281,7 +281,16 @@ fn cec_reader_loop() {
                     }
                 }
                 let _ = stdin;
-                *cec_child().lock().unwrap_or_else(|e| e.into_inner()) = None;
+                // Reap the child (dropping a Child does not wait, which would
+                // leave a zombie behind on every restart).
+                if let Some(mut child) = cec_child()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take()
+                {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
                 // Exited almost immediately: no adapter -> back off; otherwise
                 // (e.g. killed for a port change) restart quickly.
                 let backoff = started.elapsed() < Duration::from_secs(3);
