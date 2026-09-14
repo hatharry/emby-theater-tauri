@@ -1,0 +1,50 @@
+# Build the Emby Theater .deb for Raspberry Pi / arm64 (aarch64) under QEMU
+# emulation, then smoke-test it.
+#
+# The whole build runs natively inside an arm64 image (qemu-aarch64 user-mode
+# emulation via binfmt), so tauri-bundler stamps Architecture: arm64 by itself
+# and the deb's dependency set is validated against the real arm64 archive.
+# NOTE: compiling ~500 crates under emulation is slow (expect well over an
+# hour on a fast host); the apt/layer cache makes rebuilds cheap.
+#
+# Usage:
+#   docker build -f docker/Dockerfile.arm64 -t embytheater-arm64 .
+#   docker run --rm embytheater-arm64          # smoke test
+#   docker run --rm -v "$PWD/out:/out" embytheater-arm64 cp \
+#       /app/src-tauri/target/release/bundle/deb/emby-theater_0.1.0_arm64.deb /out/
+#
+# Requires qemu-aarch64 binfmt registration (e.g. `docker run --privileged
+# --rm tonistiigi/binfmt --install arm64`).
+FROM --platform=linux/arm64 ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Toolchain + Tauri system dependencies (same set as Dockerfile.test; all are
+# available for arm64, including gstreamer1.0-vaapi and cec-utils).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates gnupg build-essential pkg-config \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+    nodejs npm \
+    desktop-file-utils xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust via rustup (native arm64 toolchain)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+COPY . .
+
+# Build the release .deb bundle (Architecture: arm64 — the host is arm64)
+RUN npm install && npm run build
+
+# Install the package and verify contents
+RUN apt-get update && apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb \
+    && rm -rf /var/lib/apt/lists/* \
+    && test -x /usr/bin/emby-theater \
+    && test -f /usr/share/applications/emby-theater.desktop \
+    && desktop-file-validate /usr/share/applications/*.desktop
+
+# Smoke test: launch under Xvfb (no real display), give it time to start,
+# then confirm the process is alive and clean up.
+CMD ["bash", "-c", "xvfb-run -a /usr/bin/emby-theater & APP=$!; sleep 30; if kill -0 $APP; then echo SMOKE-TEST-PASS: emby-theater running on arm64; kill $APP; else echo SMOKE-TEST-FAIL: emby-theater exited; exit 1; fi"]
