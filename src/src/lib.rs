@@ -388,35 +388,7 @@ const APPHOST_JS: &str = r#"define(["modules/apphost.js"], function (mod) {
   return inner;
 });
 "#;
-/// Injected on the Raspberry Pi only. The V3D GPU segfaults the UI process
-/// when the web process enters accelerated compositing (the page-transition
-/// animation): AcceleratedBackingStore::update() on a null backing store.
-/// Killing the client's page transitions means compositing is never entered,
-/// so the SHM renderer (WEBKIT_DISABLE_DMABUF_RENDERER) stays crash-free.
-/// Runs at document-start; the style element applies to the target classes
-/// whenever the client creates them.
-const PI_TRANSITION_KILL_JS: &str = r#"(function () {
-  var css = [
-    '.pageContainer, .view, .mainAnimatedPages, .animatedPages {',
-    '  transition: none !important;',
-    '  transform: none !important;',
-    '  animation: none !important;',
-    '}',
-    '.pageTransitioning {',
-    '  transition-duration: 0s !important;',
-    '  animation-duration: 0s !important;',
-    '}',
-  ].join('\n');
-  function inject() {
-    if (document.getElementById('pi-no-transition')) return;
-    var s = document.createElement('style');
-    s.id = 'pi-no-transition';
-    s.textContent = css;
-    (document.head || document.documentElement).appendChild(s);
-  }
-  inject();
-  document.addEventListener('DOMContentLoaded', inject);
-})();"#;
+
 /// Host Wake-on-LAN module (same rationale as serverdiscovery: browsers cannot
 /// send UDP magic packets). `send(info)` receives the server's WakeInfo, whose
 /// MacAddress/Address/Port we forward to the native command.
@@ -844,7 +816,7 @@ pub fn run() {
 }})();"#
             );
 
-            let mut builder = WebviewWindowBuilder::new(
+            let window = WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::External(EMBY_URL.parse::<tauri::Url>().unwrap()),
@@ -854,11 +826,8 @@ pub fn run() {
             .min_inner_size(960.0, 540.0)
             .center()
             .fullscreen(fullscreen)
-            .initialization_script(&start_info);
-            if is_raspberry_pi() {
-                builder = builder.initialization_script(PI_TRANSITION_KILL_JS);
-            }
-            let window = builder.build()?;
+            .initialization_script(&start_info)
+            .build()?;
 
             // wry registers custom schemes as secure but NOT CORS-enabled, and
             // the Emby client fetches plugin page HTML with XHR (its `text!`
