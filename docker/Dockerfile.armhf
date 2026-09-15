@@ -55,13 +55,13 @@ RUN npm install && npx tauri build --config docker/armhf.tauri.conf.json
 # the slow compile layer above stays cached across edits.
 RUN cd src/target/release/bundle/deb \
     && for deb in *_armel.deb; do \
-         [ -e "$deb" ] || continue; \
-         dir="${deb%.deb}"; \
-         dpkg-deb -R "$deb" "$dir" \
-         && sed -i 's/^Architecture:.*/Architecture: armhf/' "$dir/DEBIAN/control" \
-         && dpkg-deb -b "$dir" "${deb%_armel.deb}_armhf.deb" \
-         && rm -rf "$dir" "$deb"; \
-       done \
+    [ -e "$deb" ] || continue; \
+    dir="${deb%.deb}"; \
+    dpkg-deb -R "$deb" "$dir" \
+    && sed -i 's/^Architecture:.*/Architecture: armhf/' "$dir/DEBIAN/control" \
+    && dpkg-deb -b "$dir" "${deb%_armel.deb}_armhf.deb" \
+    && rm -rf "$dir" "$deb"; \
+    done \
     && ls -la
 
 # Install the package and verify contents

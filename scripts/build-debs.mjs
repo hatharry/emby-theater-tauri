@@ -64,12 +64,25 @@ function dockerDebLeg({ dockerfile, image, binfmt, binfmtHint }) {
   const cid = capture('docker', ['create', image]);
   try {
     mkdirSync(outDir, { recursive: true });
-    console.log(`\n$ docker cp <container>:/app/src/target/release/bundle/deb out/`);
-    execFileSync(
-      'docker',
-      ['cp', `${cid}:/app/src/target/release/bundle/deb/.`, outDir],
-      { cwd: root, stdio: 'inherit' }
-    );
+    // Copy only the .deb files — the bundle dir also contains the bundler's
+    // unpacked work directory, which we don't want in out/.
+    const listing = capture('docker', [
+      'run',
+      '--rm',
+      '--entrypoint',
+      'bash',
+      image,
+      '-c',
+      'ls /app/src/target/release/bundle/deb/*.deb',
+    ]);
+    for (const path of listing.split('\n').filter(Boolean)) {
+      const name = path.split('/').pop();
+      console.log(`\n$ docker cp <container>:${path} out/${name}`);
+      execFileSync('docker', ['cp', `${cid}:${path}`, join(outDir, name)], {
+        cwd: root,
+        stdio: 'inherit',
+      });
+    }
   } finally {
     execFileSync('docker', ['rm', cid], { stdio: 'ignore' });
   }
