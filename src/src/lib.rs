@@ -619,9 +619,9 @@ fn set_layout_mode(app: tauri::AppHandle, mode: String) {
 
 /// True when the machine has an NVIDIA GPU (vendor 0x10de on the PCI bus, or
 /// the proprietary driver loaded). The WebKitGTK crash workarounds below are
-/// only needed there; on other GPUs (Intel, AMD, Raspberry Pi) hardware
-/// acceleration works fine and forcing SHM/CPU rendering would only slow
-/// things down.
+/// needed there; on Intel/AMD hardware acceleration works fine and forcing
+/// SHM/CPU rendering would only slow things down. Raspberry Pi needs its own
+/// workaround (see `is_raspberry_pi`).
 fn has_nvidia_gpu() -> bool {
     if fs::metadata("/proc/driver/nvidia/version").is_ok() {
         return true;
@@ -666,6 +666,26 @@ fn apply_webkit_nvidia_workarounds() {
     }
 }
 
+/// True on a Raspberry Pi (device-tree compatible string). The Pi's V3D GPU
+/// combined with WebKitGTK's dmabuf renderer fails every page load with
+/// "internallyFailedLoadTimerFired" (WebLoaderStrategy.cpp), leaving the TV
+/// client stuck on its splash screen.
+fn is_raspberry_pi() -> bool {
+    fs::read_to_string("/proc/device-tree/compatible")
+        .map(|c| c.contains("raspberrypi"))
+        .unwrap_or(false)
+}
+
+/// Disabling the dmabuf renderer routes WebKit through shared memory, which
+/// loads fine on the Pi. Unlike the NVIDIA workarounds this must be set for
+/// every mode — the failure is in the initial page load, before any layout is
+/// chosen — and before the webview spawns so the helper processes inherit it.
+fn apply_webkit_pi_workarounds() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -703,8 +723,13 @@ pub fn run() {
             // Start in the mode the user last chose in the client's settings
             // (view mode "TV" -> fullscreen, anything else -> normal window).
             let fullscreen = saved_layout_mode(&handle) != "normal";
-            // The compositing crash is only reachable in the TV layout, so the
-            // workarounds are applied only for it (and only on NVIDIA).
+            // The Pi's dmabuf load failure hits every mode (it happens during
+            // the initial page load), so it is applied unconditionally. The
+            // NVIDIA compositing crash is only reachable in the TV layout, so
+            // those workarounds stay mode-gated.
+            if is_raspberry_pi() {
+                apply_webkit_pi_workarounds();
+            }
             if fullscreen && has_nvidia_gpu() {
                 apply_webkit_nvidia_workarounds();
             }

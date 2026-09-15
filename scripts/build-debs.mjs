@@ -11,7 +11,7 @@
 // Flags: --skip-arm64, --skip-armhf, --arm64-only, --armhf-only.
 
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -113,6 +113,38 @@ if (!skipArmhf && !arm64Only) {
     binfmtHint: 'arm',
   });
 }
+
+// Debian trixie renamed libgtk-3-0 -> libgtk-3-0t64 (the t64 transition)
+// without providing the old name, so the bundler's auto-added dependency
+// makes apt fail there. Rewrite it as an alternative so the deb installs on
+// both Ubuntu and Debian. Applied to every deb in out/ after collection.
+function fixupDebDeps() {
+  for (const deb of readdirSync(outDir).filter((f) => f.endsWith('.deb'))) {
+    const path = join(outDir, deb);
+    const dir = join(outDir, `${deb}.fix`);
+    rmSync(dir, { recursive: true, force: true });
+    execFileSync('dpkg-deb', ['-R', path, dir], { stdio: 'inherit' });
+    const control = join(dir, 'DEBIAN', 'control');
+    const before = readFileSync(control, 'utf8');
+    // Collapse any existing libgtk-3-0 / t64 alternative to the canonical
+    // "libgtk-3-0 | libgtk-3-0t64" form (idempotent across rebuilds).
+    const after = before.replace(
+      /\blibgtk-3-0(?:t64)?(?:\s*\|\s*libgtk-3-0(?:t64)?)*/g,
+      'libgtk-3-0 | libgtk-3-0t64'
+    );
+    if (after === before) {
+      rmSync(dir, { recursive: true, force: true });
+      continue;
+    }
+    writeFileSync(control, after);
+    execFileSync('dpkg-deb', ['-b', '--root-owner-group', dir, path], {
+      stdio: 'inherit',
+    });
+    rmSync(dir, { recursive: true, force: true });
+    console.log(`  fixed libgtk-3-0t64 dependency in ${deb}`);
+  }
+}
+fixupDebDeps();
 
 console.log('\nAll debs in out/:');
 for (const f of readdirSync(outDir).filter((f) => f.endsWith('.deb'))) console.log(`  ${f}`);
