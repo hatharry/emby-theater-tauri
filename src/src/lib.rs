@@ -603,8 +603,14 @@ fn set_layout_mode(app: tauri::AppHandle, mode: String) {
         );
     }
     let fullscreen = mode != "normal";
-    if fullscreen && has_nvidia_gpu() && std::env::var_os("WEBKIT_DMABUF_RENDERER_FORCE_SHM").is_none()
-    {
+    let restart_for_nvidia = fullscreen
+        && has_nvidia_gpu()
+        && std::env::var_os("WEBKIT_DMABUF_RENDERER_FORCE_SHM").is_none();
+    let restart_for_pi = fullscreen
+        && is_raspberry_pi()
+        && webkit_version_below(2, 50)
+        && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none();
+    if restart_for_nvidia || restart_for_pi {
         // Switching into TV mode at runtime: the crash workarounds must be in
         // the environment before the webview spawns, so relaunch (the new
         // process reads the persisted "tv" mode and applies them).
@@ -747,11 +753,10 @@ pub fn run() {
             // Start in the mode the user last chose in the client's settings
             // (view mode "TV" -> fullscreen, anything else -> normal window).
             let fullscreen = saved_layout_mode(&handle) != "normal";
-            // The Pi's dmabuf load failure hits every mode (it happens during
-            // the initial page load), so it is applied unconditionally. The
-            // NVIDIA compositing crash is only reachable in the TV layout, so
-            // those workarounds stay mode-gated.
-            if is_raspberry_pi() {
+            // Both crash workarounds are only reachable in the TV layout, so
+            // they stay mode-gated: the desktop layout never animates page
+            // transitions and renders fine over the default dmabuf path.
+            if fullscreen && is_raspberry_pi() {
                 apply_webkit_pi_workarounds();
             }
             if fullscreen && has_nvidia_gpu() {
