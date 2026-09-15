@@ -35,8 +35,9 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 WORKDIR /app
 COPY . .
 
-# Build the release .deb bundle (Architecture: arm64 — the host is arm64)
-RUN npm install && npm run build
+# Build the release .deb bundle (native leg only; this container is arm64,
+# so tauri-bundler stamps Architecture: arm64)
+RUN npm install && npm run build:native
 
 # Install the package and verify contents
 RUN apt-get update && apt-get install -y ./src/target/release/bundle/deb/*.deb \

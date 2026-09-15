@@ -6,7 +6,9 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "node scripts/build-debs.mjs",
+    "build:native": "tauri build",
+    "build:arm64": "node scripts/build-debs.mjs --arm64-only",
     "icon": "node scripts/make-icon.mjs && tauri icon app-icon.png"
   },
   "devDependencies": {
