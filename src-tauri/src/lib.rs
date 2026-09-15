@@ -610,6 +610,25 @@ fn set_layout_mode(app: tauri::AppHandle, mode: String) {
     }
 }
 
+/// True when the machine has an NVIDIA GPU (vendor 0x10de on the PCI bus, or
+/// the proprietary driver loaded). The WebKitGTK crash workarounds in run()
+/// are only needed there; on other GPUs (Intel, AMD, Raspberry Pi) hardware
+/// acceleration works fine and forcing SHM/CPU rendering would only slow
+/// things down.
+fn has_nvidia_gpu() -> bool {
+    if fs::metadata("/proc/driver/nvidia/version").is_ok() {
+        return true;
+    }
+    match fs::read_dir("/sys/bus/pci/devices") {
+        Ok(devs) => devs.flatten().any(|d| {
+            fs::read_to_string(d.path().join("vendor"))
+                .map(|v| v.trim().eq_ignore_ascii_case("0x10de"))
+                .unwrap_or(false)
+        }),
+        Err(_) => false,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK + NVIDIA: the first accelerated-compositing trigger on a page
@@ -624,15 +643,19 @@ pub fn run() {
     // added, so its own opt-out (WEBKIT_FORCE_DMABUF_RENDERER) must be set
     // alongside for FORCE_SHM to take effect. WEBKIT_SKIA_ENABLE_CPU_RENDERING
     // keeps Skia off the NVIDIA GL path entirely, which also avoids the
-    // driver's GPU-worker teardown segfault on exit. Set before the webview
-    // spawns so all helper processes inherit them; respect pre-set values.
-    for (var, value) in [
-        ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"),
-        ("WEBKIT_FORCE_DMABUF_RENDERER", "1"),
-        ("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1"),
-    ] {
-        if std::env::var_os(var).is_none() {
-            std::env::set_var(var, value);
+    // driver's GPU-worker teardown segfault on exit. All three target NVIDIA
+    // bugs specifically, so they are only applied on machines with an NVIDIA
+    // GPU. Set before the webview spawns so all helper processes inherit
+    // them; respect pre-set values.
+    if has_nvidia_gpu() {
+        for (var, value) in [
+            ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"),
+            ("WEBKIT_FORCE_DMABUF_RENDERER", "1"),
+            ("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1"),
+        ] {
+            if std::env::var_os(var).is_none() {
+                std::env::set_var(var, value);
+            }
         }
     }
 
