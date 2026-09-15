@@ -388,7 +388,35 @@ const APPHOST_JS: &str = r#"define(["modules/apphost.js"], function (mod) {
   return inner;
 });
 "#;
-
+/// Injected on the Raspberry Pi only. The V3D GPU segfaults the UI process
+/// when the web process enters accelerated compositing (the page-transition
+/// animation): AcceleratedBackingStore::update() on a null backing store.
+/// Killing the client's page transitions means compositing is never entered,
+/// so the SHM renderer (WEBKIT_DISABLE_DMABUF_RENDERER) stays crash-free.
+/// Runs at document-start; the style element applies to the target classes
+/// whenever the client creates them.
+const PI_TRANSITION_KILL_JS: &str = r#"(function () {
+  var css = [
+    '.pageContainer, .view, .mainAnimatedPages, .animatedPages {',
+    '  transition: none !important;',
+    '  transform: none !important;',
+    '  animation: none !important;',
+    '}',
+    '.pageTransitioning {',
+    '  transition-duration: 0s !important;',
+    '  animation-duration: 0s !important;',
+    '}',
+  ].join('\n');
+  function inject() {
+    if (document.getElementById('pi-no-transition')) return;
+    var s = document.createElement('style');
+    s.id = 'pi-no-transition';
+    s.textContent = css;
+    (document.head || document.documentElement).appendChild(s);
+  }
+  inject();
+  document.addEventListener('DOMContentLoaded', inject);
+})();"#;
 /// Host Wake-on-LAN module (same rationale as serverdiscovery: browsers cannot
 /// send UDP magic packets). `send(info)` receives the server's WakeInfo, whose
 /// MacAddress/Address/Port we forward to the native command.
@@ -676,12 +704,36 @@ fn is_raspberry_pi() -> bool {
         .unwrap_or(false)
 }
 
+/// True when the linked WebKitGTK is older than `major.minor`.
+fn webkit_version_below(major: u32, minor: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let (a, b) = unsafe {
+            (
+                webkit2gtk::ffi::webkit_get_major_version(),
+                webkit2gtk::ffi::webkit_get_minor_version(),
+            )
+        };
+        return (a, b) < (major, minor);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (major, minor);
+        false
+    }
+}
+
 /// Disabling the dmabuf renderer routes WebKit through shared memory, which
-/// loads fine on the Pi. Unlike the NVIDIA workarounds this must be set for
-/// every mode — the failure is in the initial page load, before any layout is
-/// chosen — and before the webview spawns so the helper processes inherit it.
+/// loads fine on the older (2.48, 32-bit) Pi build where the dmabuf path fails
+/// page loads. Newer WebKitGTK (>= 2.50) renders correctly over dmabuf on the
+/// Pi's V3D GPU, and forcing SHM there is actively harmful: the shared-memory
+/// renderer leaves a null AcceleratedBackingStore that segfaults the UI process
+/// the first time a page transition enters accelerated compositing. So the
+/// workaround is applied only below 2.50. Must run before the webview spawns so
+/// the helper processes inherit the environment; respects pre-set values.
 fn apply_webkit_pi_workarounds() {
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+    if webkit_version_below(2, 50) && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+    {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 }
@@ -792,7 +844,7 @@ pub fn run() {
 }})();"#
             );
 
-            let window = WebviewWindowBuilder::new(
+            let mut builder = WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::External(EMBY_URL.parse::<tauri::Url>().unwrap()),
@@ -802,8 +854,11 @@ pub fn run() {
             .min_inner_size(960.0, 540.0)
             .center()
             .fullscreen(fullscreen)
-            .initialization_script(&start_info)
-            .build()?;
+            .initialization_script(&start_info);
+            if is_raspberry_pi() {
+                builder = builder.initialization_script(PI_TRANSITION_KILL_JS);
+            }
+            let window = builder.build()?;
 
             // wry registers custom schemes as secure but NOT CORS-enabled, and
             // the Emby client fetches plugin page HTML with XHR (its `text!`
