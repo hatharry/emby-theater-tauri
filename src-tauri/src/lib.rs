@@ -603,6 +603,13 @@ fn set_layout_mode(app: tauri::AppHandle, mode: String) {
         );
     }
     let fullscreen = mode != "normal";
+    if fullscreen && has_nvidia_gpu() && std::env::var_os("WEBKIT_DMABUF_RENDERER_FORCE_SHM").is_none()
+    {
+        // Switching into TV mode at runtime: the crash workarounds must be in
+        // the environment before the webview spawns, so relaunch (the new
+        // process reads the persisted "tv" mode and applies them).
+        app.restart(); // never returns
+    }
     if let Some(w) = app.get_webview_window("main") {
         if w.is_fullscreen().unwrap_or(!fullscreen) != fullscreen {
             let _ = w.set_fullscreen(fullscreen);
@@ -611,8 +618,8 @@ fn set_layout_mode(app: tauri::AppHandle, mode: String) {
 }
 
 /// True when the machine has an NVIDIA GPU (vendor 0x10de on the PCI bus, or
-/// the proprietary driver loaded). The WebKitGTK crash workarounds in run()
-/// are only needed there; on other GPUs (Intel, AMD, Raspberry Pi) hardware
+/// the proprietary driver loaded). The WebKitGTK crash workarounds below are
+/// only needed there; on other GPUs (Intel, AMD, Raspberry Pi) hardware
 /// acceleration works fine and forcing SHM/CPU rendering would only slow
 /// things down.
 fn has_nvidia_gpu() -> bool {
@@ -629,36 +636,38 @@ fn has_nvidia_gpu() -> bool {
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    // WebKitGTK + NVIDIA: the first accelerated-compositing trigger on a page
-    // (e.g. the TV client's page-transition animation when a menu item is
-    // clicked) segfaults the UI process on a null AcceleratedBackingStore —
-    // "segfault at 48" (bugs.webkit.org #321683, block/buzz #3654).
-    // WEBKIT_DMABUF_RENDERER_FORCE_SHM routes the renderer through shared
-    // memory and keeps the backing store valid (unlike the old
-    // WEBKIT_DISABLE_DMABUF_RENDERER, which empties the transport set and
-    // causes exactly this crash). Ubuntu's libwebkit2gtk additionally ships a
-    // disable-nvidia-dmabuf patch that bails out before the SHM mode is
-    // added, so its own opt-out (WEBKIT_FORCE_DMABUF_RENDERER) must be set
-    // alongside for FORCE_SHM to take effect. WEBKIT_SKIA_ENABLE_CPU_RENDERING
-    // keeps Skia off the NVIDIA GL path entirely, which also avoids the
-    // driver's GPU-worker teardown segfault on exit. All three target NVIDIA
-    // bugs specifically, so they are only applied on machines with an NVIDIA
-    // GPU. Set before the webview spawns so all helper processes inherit
-    // them; respect pre-set values.
-    if has_nvidia_gpu() {
-        for (var, value) in [
-            ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"),
-            ("WEBKIT_FORCE_DMABUF_RENDERER", "1"),
-            ("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1"),
-        ] {
-            if std::env::var_os(var).is_none() {
-                std::env::set_var(var, value);
-            }
+/// WebKitGTK + NVIDIA: the first accelerated-compositing trigger on a page
+/// (e.g. the TV client's page-transition animation when a menu item is
+/// clicked) segfaults the UI process on a null AcceleratedBackingStore —
+/// "segfault at 48" (bugs.webkit.org #321683, block/buzz #3654). The crash is
+/// only ever reachable in the TV layout, whose transitions animate; the
+/// desktop layout does not trigger it.
+/// WEBKIT_DMABUF_RENDERER_FORCE_SHM routes the renderer through shared memory
+/// and keeps the backing store valid (unlike the old
+/// WEBKIT_DISABLE_DMABUF_RENDERER, which empties the transport set and causes
+/// exactly this crash). Ubuntu's libwebkit2gtk additionally ships a
+/// disable-nvidia-dmabuf patch that bails out before the SHM mode is added, so
+/// its own opt-out (WEBKIT_FORCE_DMABUF_RENDERER) must be set alongside for
+/// FORCE_SHM to take effect. WEBKIT_SKIA_ENABLE_CPU_RENDERING keeps Skia off
+/// the NVIDIA GL path entirely, which also avoids the driver's GPU-worker
+/// teardown segfault on exit.
+///
+/// Must be called before the webview spawns so all helper processes inherit
+/// the environment; respects pre-set values.
+fn apply_webkit_nvidia_workarounds() {
+    for (var, value) in [
+        ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"),
+        ("WEBKIT_FORCE_DMABUF_RENDERER", "1"),
+        ("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1"),
+    ] {
+        if std::env::var_os(var).is_none() {
+            std::env::set_var(var, value);
         }
     }
+}
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             emby_url,
@@ -694,6 +703,11 @@ pub fn run() {
             // Start in the mode the user last chose in the client's settings
             // (view mode "TV" -> fullscreen, anything else -> normal window).
             let fullscreen = saved_layout_mode(&handle) != "normal";
+            // The compositing crash is only reachable in the TV layout, so the
+            // workarounds are applied only for it (and only on NVIDIA).
+            if fullscreen && has_nvidia_gpu() {
+                apply_webkit_nvidia_workarounds();
+            }
 
             // Injected before any page script runs, so the Emby app sees
             // window.appStartInfo on first load. Once the page's Emby.App is
