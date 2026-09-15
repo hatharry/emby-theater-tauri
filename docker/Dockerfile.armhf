@@ -1,0 +1,76 @@
+# Build the Emby Theater .deb for 32-bit Raspberry Pi OS (armv7 / armhf)
+# under QEMU emulation, then smoke-test it.
+#
+# Uses Ubuntu 22.04 (Jam): the last LTS with full armhf coverage in the
+# main archive (24.04 dropped armhf). Everything builds natively inside
+# the arm/v7 image (qemu-arm user-mode emulation via binfmt), so
+# tauri-bundler stamps Architecture: armhf by itself.
+#
+# NOTE: compiling ~500 crates under qemu-arm emulation is very slow
+# (expect multiple hours on a fast host); the apt/layer cache makes
+# rebuilds cheap.
+#
+# Usage:
+#   docker build -f docker/Dockerfile.armhf -t embytheater-armhf .
+#   docker run --rm embytheater-armhf          # smoke test
+#   docker run --rm -v "$PWD/out:/out" embytheater-armhf cp \
+#       /app/src/target/release/bundle/deb/emby-theater_0.1.0_armhf.deb /out/
+#
+# Requires qemu-arm binfmt registration (e.g. `docker run --privileged
+# --rm tonistiigi/binfmt --install arm`).
+FROM --platform=linux/arm/v7 ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Toolchain + Tauri system dependencies. gstreamer1.0-vaapi is omitted:
+# it is not built for armhf (VA-API is x86-only).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates gnupg build-essential pkg-config xz-utils \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+    desktop-file-utils xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js LTS from nodejs.org — Ubuntu 22.04's nodejs package (v12) is too
+# old for the Tauri CLI (optional chaining, etc.). Official armv7l builds
+# exist for Node >= 18.
+ENV NODE_VERSION=20.20.2
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-armv7l.tar.xz" \
+    | tar -xJ -C /usr/local --strip-components=1 \
+    && node --version && npm --version
+
+# Rust via rustup (native armhf toolchain)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+COPY . .
+
+# Build the release .deb bundle with the armhf config override
+# (drops the armhf-unavailable gstreamer1.0-vaapi dependency).
+RUN npm install && npx tauri build --config docker/armhf.tauri.conf.json
+
+# tauri-bundler maps armv7 targets to Debian arch "armel" (soft-float), but
+# the gnueabihf toolchain produces hard-float binaries. Re-stamp the deb as
+# armhf: unpack, fix the Architecture field, repack. Kept in its own layer so
+# the slow compile layer above stays cached across edits.
+RUN cd src/target/release/bundle/deb \
+    && for deb in *_armel.deb; do \
+         [ -e "$deb" ] || continue; \
+         dir="${deb%.deb}"; \
+         dpkg-deb -R "$deb" "$dir" \
+         && sed -i 's/^Architecture:.*/Architecture: armhf/' "$dir/DEBIAN/control" \
+         && dpkg-deb -b "$dir" "${deb%_armel.deb}_armhf.deb" \
+         && rm -rf "$dir" "$deb"; \
+       done \
+    && ls -la
+
+# Install the package and verify contents
+RUN apt-get update && apt-get install -y ./src/target/release/bundle/deb/*.deb \
+    && rm -rf /var/lib/apt/lists/* \
+    && test -x /usr/bin/emby-theater \
+    && test -f /usr/share/applications/emby-theater.desktop \
+    && desktop-file-validate /usr/share/applications/*.desktop
+
+# Smoke test: launch under Xvfb (no real display), give it time to start,
+# then confirm the process is alive and clean up.
+CMD ["bash", "-c", "xvfb-run -a /usr/bin/emby-theater & APP=$!; sleep 40; if kill -0 $APP; then echo SMOKE-TEST-PASS: emby-theater running on armhf; kill $APP; else echo SMOKE-TEST-FAIL: emby-theater exited; exit 1; fi"]
