@@ -11,7 +11,7 @@
 #   docker build -f docker/Dockerfile.arm64 -t embytheater-arm64 .
 #   docker run --rm embytheater-arm64          # smoke test
 #   docker run --rm -v "$PWD/out:/out" embytheater-arm64 cp \
-#       /app/src-tauri/target/release/bundle/deb/emby-theater_0.1.0_arm64.deb /out/
+#       /app/src/target/release/bundle/deb/emby-theater_0.1.0_arm64.deb /out/
 #
 # Requires qemu-aarch64 binfmt registration (e.g. `docker run --privileged
 # --rm tonistiigi/binfmt --install arm64`).
@@ -39,7 +39,7 @@ COPY . .
 RUN npm install && npm run build
 
 # Install the package and verify contents
-RUN apt-get update && apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb \
+RUN apt-get update && apt-get install -y ./src/target/release/bundle/deb/*.deb \
     && rm -rf /var/lib/apt/lists/* \
     && test -x /usr/bin/emby-theater \
     && test -f /usr/share/applications/emby-theater.desktop \

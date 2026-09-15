@@ -23,7 +23,7 @@ COPY . .
 RUN npm install && npm run build
 
 # Install the package and verify contents
-RUN apt-get update && apt-get install -y ./src-tauri/target/release/bundle/deb/*_amd64.deb \
+RUN apt-get update && apt-get install -y ./src/target/release/bundle/deb/*_amd64.deb \
     && rm -rf /var/lib/apt/lists/* \
     && test -x /usr/bin/emby-theater \
     && test -f /usr/share/applications/emby-theater.desktop \
