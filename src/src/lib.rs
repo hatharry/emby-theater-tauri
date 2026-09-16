@@ -476,6 +476,79 @@ async fn wake_on_lan(
         .unwrap_or(false)
 }
 
+/// Injected (Raspberry Pi only) before any page script. Two fixes for smooth
+/// video playback:
+///
+/// 1. HEVC: WebKitGTK's GStreamer backend reports HEVC playable because a
+///    decoder element exists, but the Pi has no HEVC hardware block, so that
+///    path is software-only and stutters. Returning "" for the HEVC codec
+///    family makes the client's device-profile builder
+///    (browserdeviceprofile.js, via player.getDeviceProfile) omit HEVC from the
+///    direct-play list, so the server transcodes to H.264, which the Pi decodes
+///    in hardware. H.264/VP9/AV1 detection (avc1/vp09/av01) is untouched: none
+///    of those fourccs contain an HEVC token.
+///
+/// 2. Transcode container: the server delivers the transcode as HLS, which this
+///    webview cannot play — hls.js over MSE throws mediadecodeerror, and native
+///    (GStreamer) HLS throws "no compatible streams". It does, however, play a
+///    progressive MP4 in hardware (verified: /videos/…/stream.mp4 reaches
+///    PLAYING on v4l2h264dec). The client's profile builder only offers HLS as a
+///    video *streaming* profile, so we wrap Emby.importModule to prepend an MP4
+///    streaming profile to the builder's result; the server picks the first
+///    match and emits stream.mp4, which the player loads with a plain
+///    video.src (no HLS).
+const PI_PLAYBACK_JS: &str = r#"(function () {
+  var proto = HTMLMediaElement.prototype;
+  var orig = proto.canPlayType;
+  var hevc = /hvc1|hev1|dvh1|dvhe|hevc/i;
+  proto.canPlayType = function (type) {
+    if (typeof type === "string" && hevc.test(type)) return "";
+    return orig.call(this, type);
+  };
+  // Prepend a progressive-MP4 streaming profile so the server transcodes to
+  // stream.mp4 (hardware-decodable) instead of HLS (unplayable here). Patch
+  // lazily by wrapping Emby.importModule — the player calls it for the profile
+  // builder at playback time. (Requiring the module early would evaluate its
+  // connectionmanager.js dependency before the service locator is initialized
+  // and break startup.)
+  function wrapImport() {
+    if (!(window.Emby && typeof Emby.importModule === "function")) {
+      setTimeout(wrapImport, 50);
+      return;
+    }
+    if (Emby.__piWrapped) return;
+    Emby.__piWrapped = true;
+    var origImport = Emby.importModule;
+    Emby.importModule = function (path) {
+      var p = origImport.call(Emby, path);
+      if (String(path).indexOf("browserdeviceprofile") < 0) return p;
+      return p.then(function (builder) {
+        if (typeof builder !== "function" || builder.__piProfile) return builder;
+        var wrapped = function (options) {
+          return Promise.resolve(builder(options)).then(function (profile) {
+            if (profile && profile.TranscodingProfiles) {
+              profile.TranscodingProfiles.unshift({
+                Container: "mp4",
+                Type: "Video",
+                VideoCodec: "h264",
+                AudioCodec: "aac,mp3",
+                Context: "Streaming",
+                Protocol: "http",
+                MaxAudioChannels: "2",
+              });
+            }
+            return profile;
+          });
+        };
+        wrapped.__piProfile = true;
+        return wrapped;
+      });
+    };
+  }
+  wrapImport();
+})();
+"#;
+
 /// AMD module served over the `embyhost://` custom protocol and referenced from
 /// `appStartInfo.paths.serverdiscovery`. The client's loader resolves it instead
 /// of its built-in no-op discovery module (browsers cannot UDP broadcast), and
@@ -1059,7 +1132,7 @@ pub fn run() {
 }})();"#
             );
 
-            let window = WebviewWindowBuilder::new(
+            let mut builder = WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::External(EMBY_URL.parse::<tauri::Url>().unwrap()),
@@ -1069,8 +1142,13 @@ pub fn run() {
             .min_inner_size(960.0, 540.0)
             .center()
             .fullscreen(fullscreen)
-            .initialization_script(&start_info)
-            .build()?;
+            .initialization_script(&start_info);
+            if is_raspberry_pi() {
+                // HEVC is software-only here (transcode it to H.264) and the
+                // transcode must be progressive MP4, not HLS (see above).
+                builder = builder.initialization_script(PI_PLAYBACK_JS);
+            }
+            let window = builder.build()?;
 
             // wry registers custom schemes as secure but NOT CORS-enabled, and
             // the Emby client fetches plugin page HTML with XHR (its `text!`
