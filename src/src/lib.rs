@@ -225,6 +225,31 @@ fn cec_child() -> &'static Mutex<Option<std::process::Child>> {
     CHILD.get_or_init(Default::default)
 }
 
+/// The CEC adapter (a /dev/cecN path) the user picked on the plugin's
+/// settings page; None = auto (probe for the connected one).
+fn cec_device() -> &'static Mutex<Option<String>> {
+    static DEVICE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    DEVICE.get_or_init(Default::default)
+}
+
+/// Called by the CEC plugin settings page (and at startup) with the chosen
+/// adapter (""/None = auto). Restarts cec-client on change.
+#[tauri::command]
+fn cec_set_device(device: Option<String>) {
+    let device = device.filter(|d| !d.is_empty());
+    let changed = {
+        let mut g = cec_device().lock().unwrap_or_else(|e| e.into_inner());
+        let changed = *g != device;
+        *g = device;
+        changed
+    };
+    if changed {
+        if let Some(child) = cec_child().lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            let _ = child.kill();
+        }
+    }
+}
+
 /// Called by the CEC plugin (at startup and when the settings page saves) with
 /// the configured HDMI port (""/None = auto). Restarts cec-client on change.
 #[tauri::command]
@@ -243,6 +268,100 @@ fn cec_set_hdmi_port(port: Option<String>) {
     }
 }
 
+/// The CEC adapters present as /dev/cecN, in index order. On a Raspberry Pi 4
+/// there is one per HDMI output (cec0 = HDMI0, cec1 = HDMI1); only the one the
+/// TV is plugged into is usable.
+fn cec_adapters() -> Vec<String> {
+    let mut v = Vec::new();
+    if let Ok(rd) = fs::read_dir("/dev") {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.len() > 3
+                && name.starts_with("cec")
+                && name[3..].chars().all(|c| c.is_ascii_digit())
+            {
+                v.push(format!("/dev/{}", name));
+            }
+        }
+    }
+    v.sort();
+    v
+}
+
+/// Outcome of probing one CEC adapter with a short-lived monitor client.
+enum CecProbe {
+    /// Opens and reports a real physical address: the TV is on this adapter.
+    Connected,
+    /// Opens but the driver reports f.f.f.f: nothing is plugged in here.
+    Disconnected,
+    /// Another client (usually our own reader) holds the adapter: it is in
+    /// use, which for display purposes counts as connected.
+    Busy,
+}
+
+/// Probe one adapter. A monitor client on a disconnected adapter logs
+/// "physical address is invalid" (the vc4 driver reports f.f.f.f); one on a
+/// busy adapter logs "could not open a connection"; the connected adapter logs
+/// neither. Monitor mode does not claim a logical address or send keys, so
+/// probing is side-effect-free.
+fn probe_cec_adapter(dev: &str) -> CecProbe {
+    let child = std::process::Command::new("cec-client")
+        .args(["-m", "-d", "15", dev])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(_) => return CecProbe::Disconnected,
+    };
+    std::thread::sleep(Duration::from_millis(1200));
+    let _ = child.kill();
+    match child.wait_with_output() {
+        Ok(out) => {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            if text.contains("physical address is invalid") {
+                CecProbe::Disconnected
+            } else if text.contains("could not open") {
+                CecProbe::Busy
+            } else {
+                CecProbe::Connected
+            }
+        }
+        Err(_) => CecProbe::Disconnected,
+    }
+}
+
+/// List the CEC adapters for the settings page: every /dev/cecN with a flag
+/// for whether it is usable (connected, or held by our running client).
+#[tauri::command]
+fn cec_devices() -> Vec<serde_json::Value> {
+    cec_adapters()
+        .into_iter()
+        .map(|path| {
+            let usable = !matches!(probe_cec_adapter(&path), CecProbe::Disconnected);
+            serde_json::json!({ "path": path, "connected": usable })
+        })
+        .collect()
+}
+
+/// Pick the adapter to talk to in auto mode. With a single adapter (or none
+/// enumerable) return None and let cec-client autodetect; with several, probe
+/// each and use the connected one.
+fn pick_cec_adapter() -> Option<String> {
+    let adapters = cec_adapters();
+    if adapters.len() <= 1 {
+        return None;
+    }
+    adapters
+        .into_iter()
+        .find(|d| matches!(probe_cec_adapter(d), CecProbe::Connected))
+}
+
 /// Run cec-client (from the cec-utils/libcec package) as a playback device and
 /// queue the UI commands the TV forwards from its remote. Restarts the client
 /// if it exits and retries periodically when no adapter is present, so
@@ -253,12 +372,24 @@ fn cec_reader_loop() {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
+        let device = cec_device()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let mut builder = std::process::Command::new("cec-client");
         builder
-            .args(["-t", "playback1", "-d", "15", "-o", "EmbyTheater"])
+            // -t takes a device-type letter (p=playback); the logical-address
+            // name "playback1" is not valid here and libcec silently falls back
+            // to a recording device.
+            .args(["-t", "p", "-d", "15", "-o", "EmbyTheater"])
             .stdin(Stdio::piped()) // kept open: EOF would make cec-client exit
             .stderr(Stdio::null())
             .stdout(Stdio::piped());
+        // The adapter chosen on the settings page wins; auto probes instead.
+        match device.or_else(pick_cec_adapter) {
+            Some(dev) => builder.arg(dev),
+            None => &mut builder,
+        };
         if let Some(p) = &port {
             // Physical address N.0.0.0 = the TV's HDMI input N.
             builder.arg("-p").arg(p);
@@ -441,10 +572,12 @@ const CEC_JS: &str = r#"define(["modules/common/inputmanager.js"], function (mod
         },
       ];
     };
-    // Apply the saved HDMI port (if any) to the native reader at startup.
+    // Apply the saved HDMI port and CEC adapter (if any) at startup.
     try {
       var p = localStorage.getItem("cec-hdmiport") || "";
       window.__TAURI_INTERNALS__.invoke("cec_set_hdmi_port", { port: p });
+      var d = localStorage.getItem("cec-device") || "";
+      window.__TAURI_INTERNALS__.invoke("cec_set_device", { device: d });
     } catch (e) {}
     var failures = 0;
     function poll() {
@@ -495,6 +628,26 @@ const CEC_PAGE_JS: &str = r#"define([
   }
   function renderSettings(view) {
     view.querySelector(".hdmiPort").value = appSettings.get("cec-hdmiport") || "";
+    // Populate the adapter select from the native probe (Auto + one option
+    // per /dev/cecN, flagged when nothing is plugged into that port).
+    var sel = view.querySelector(".cecDevice");
+    var saved = appSettings.get("cec-device") || "";
+    try {
+      window.__TAURI_INTERNALS__.invoke("cec_devices").then(
+        function (devs) {
+          while (sel.options.length > 1) sel.removeChild(sel.options[1]);
+          for (var i = 0; i < devs.length; i++) {
+            var o = document.createElement("option");
+            o.value = devs[i].path;
+            o.textContent = devs[i].connected ? devs[i].path : devs[i].path + " (nothing attached)";
+            sel.appendChild(o);
+          }
+          sel.value = saved;
+          if (sel.value !== saved) sel.value = "";
+        },
+        function () {}
+      );
+    } catch (e) {}
   }
   function saveSettings(view) {
     var port = view.querySelector(".hdmiPort").value;
@@ -502,6 +655,13 @@ const CEC_PAGE_JS: &str = r#"define([
       appSettings.set("cec-hdmiport", port);
       try {
         window.__TAURI_INTERNALS__.invoke("cec_set_hdmi_port", { port: port });
+      } catch (e) {}
+    }
+    var device = view.querySelector(".cecDevice").value;
+    if ((appSettings.get("cec-device") || "") !== device) {
+      appSettings.set("cec-device", device);
+      try {
+        window.__TAURI_INTERNALS__.invoke("cec_set_device", { device: device });
       } catch (e) {}
     }
   }
@@ -547,7 +707,13 @@ const CEC_PAGE_HTML: &str = r#"<div is="emby-scroller" class="view flex flex-dir
           <option>10</option>
         </select>
       </div>
+      <div class="selectContainer">
+        <select is="emby-select" class="cecDevice" label="CEC adapter:">
+          <option value="">Auto</option>
+        </select>
+      </div>
       <div class="fieldDescription">Select the HDMI input on your TV that this computer is connected to, so the TV remote's buttons reach the app over CEC. Leave on Auto to detect.</div>
+      <div class="fieldDescription">On boards with one CEC adapter per HDMI port (e.g. Raspberry Pi 4), pick the adapter the TV is cabled to. Leave on Auto to probe.</div>
     </form>
   </div>
 </div>
@@ -726,7 +892,9 @@ pub fn run() {
             quit_app,
             set_layout_mode,
             cec_poll,
-            cec_set_hdmi_port
+            cec_set_hdmi_port,
+            cec_devices,
+            cec_set_device
         ])
         .register_uri_scheme_protocol("embyhost", |_ctx, req| {
             let (body, content_type) = match req.uri().path() {

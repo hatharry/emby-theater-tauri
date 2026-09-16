@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cec-set-device"
+description = "Enables the cec_set_device command without any pre-configured scope."
+commands.allow = ["cec_set_device"]
+
+[[permission]]
+identifier = "deny-cec-set-device"
+description = "Denies the cec_set_device command without any pre-configured scope."
+commands.deny = ["cec_set_device"]

@@ -10,6 +10,8 @@ fn main() {
                 "set_layout_mode",
                 "cec_poll",
                 "cec_set_hdmi_port",
+                "cec_devices",
+                "cec_set_device",
             ]),
         ),
     )
