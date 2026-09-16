@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::net::UdpSocket;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -786,7 +787,56 @@ fn set_layout_mode(app: tauri::AppHandle, mode: String) {
         if w.is_fullscreen().unwrap_or(!fullscreen) != fullscreen {
             let _ = w.set_fullscreen(fullscreen);
         }
+        // TV mode is driven by the remote (CEC/keyboard), not a mouse: hide
+        // the cursor, which would otherwise sit over the picture.
+        let _ = w.set_cursor_visible(!fullscreen);
+        #[cfg(target_os = "linux")]
+        {
+            tv_mode().store(fullscreen, Ordering::Relaxed);
+            let visible = !fullscreen;
+            let _ = w.with_webview(move |wv| set_webview_cursor(&wv.inner(), visible));
+        }
     }
+}
+
+/// Whether the TV layout is active; read by the load-changed handler to
+/// re-apply the hidden cursor after each page load (WebKit installs its own
+/// default cursor on the webview window when a new page is created).
+#[cfg(target_os = "linux")]
+fn tv_mode() -> &'static AtomicBool {
+    static TV: AtomicBool = AtomicBool::new(false);
+    &TV
+}
+
+/// WebKitGTK draws the pointer for the webview's own GDK window, so hiding
+/// the cursor on the toplevel window leaves the arrow over the page. Set an
+/// empty cursor on the webview widget's window directly.
+#[cfg(target_os = "linux")]
+fn set_webview_cursor(webview: &webkit2gtk::WebView, visible: bool) {
+    use gtk::prelude::*;
+    let Some(win) = webview.window() else {
+        return;
+    };
+    if visible {
+        win.set_cursor(None);
+        return;
+    }
+    let display = win.display();
+    let blank = gtk::gdk::Cursor::from_name(&display, "none").or_else(|| {
+        // No "none" cursor in the theme: build a 1x1 fully transparent one.
+        let bytes = gtk::glib::Bytes::from(&[0u8; 4][..]);
+        let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_bytes(
+            &bytes,
+            gtk::gdk_pixbuf::Colorspace::Rgb,
+            true,
+            8,
+            1,
+            1,
+            4,
+        );
+        Some(gtk::gdk::Cursor::from_pixbuf(&display, &pixbuf, 0, 0))
+    });
+    win.set_cursor(blank.as_ref());
 }
 
 /// True when the machine has an NVIDIA GPU (vendor 0x10de on the PCI bus, or
@@ -1008,13 +1058,21 @@ pub fn run() {
             // back empty and viewmanager crashes before the controller runs.
             #[cfg(target_os = "linux")]
             {
-                use webkit2gtk::{SecurityManagerExt, WebContextExt, WebViewExt};
+                use webkit2gtk::{LoadEvent, SecurityManagerExt, WebContextExt, WebViewExt};
                 let _ = window.with_webview(|wv| {
                     if let Some(ctx) = wv.inner().context() {
                         if let Some(sm) = ctx.security_manager() {
                             sm.register_uri_scheme_as_cors_enabled("embyhost");
                         }
                     }
+                    // WebKit sets its own default cursor on the webview window
+                    // when each new page is created, which would undo the TV-mode
+                    // hide; re-apply it after every load.
+                    wv.inner().connect_load_changed(|webview, event| {
+                        if matches!(event, LoadEvent::Finished) {
+                            set_webview_cursor(webview, !tv_mode().load(Ordering::Relaxed));
+                        }
+                    });
                 });
             }
 
