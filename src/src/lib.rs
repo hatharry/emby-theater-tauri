@@ -971,11 +971,31 @@ pub fn run() {
             // Start in the mode the user last chose in the client's settings
             // (view mode "TV" -> fullscreen, anything else -> normal window).
             let fullscreen = saved_layout_mode(&handle) != "normal";
-            // Both crash workarounds are only reachable in the TV layout, so
-            // they stay mode-gated: the desktop layout never animates page
-            // transitions and renders fine over the default dmabuf path.
-            if fullscreen && is_raspberry_pi() {
-                apply_webkit_pi_workarounds();
+            if is_raspberry_pi() {
+                // The vc4 stateless HEVC decoder (the v4l2codecs plugin's
+                // v4l2slh265dec) silently kills the WebKit web process the
+                // moment playback starts: the Pi 4 has no HEVC hardware block,
+                // so that path is broken. Drop its rank to NONE so GStreamer's
+                // autoplug picks software (libav avdec_h265) for HEVC instead.
+                // Feature-rank (not GST_PLUGIN_BLOCKLIST) is required: the
+                // blocklist is applied only during a registry scan and is a
+                // no-op once the plugin registry is cached, whereas the rank is
+                // honoured at element-selection time regardless. H.264 hardware
+                // decode is untouched (separate request-API decoder). Must be
+                // set before the webview spawns so the web process inherits it.
+                match std::env::var("GST_PLUGIN_FEATURE_RANK") {
+                    Ok(existing) if !existing.is_empty() => {
+                        std::env::set_var(
+                            "GST_PLUGIN_FEATURE_RANK",
+                            format!("{existing},v4l2slh265dec:0"),
+                        );
+                    }
+                    _ => std::env::set_var("GST_PLUGIN_FEATURE_RANK", "v4l2slh265dec:0"),
+                }
+                // The dmabuf workaround is only reachable in the TV layout.
+                if fullscreen {
+                    apply_webkit_pi_workarounds();
+                }
             }
             if fullscreen && has_nvidia_gpu() {
                 apply_webkit_nvidia_workarounds();
