@@ -531,10 +531,10 @@ const PI_PLAYBACK_JS: &str = r#"(function () {
                 Container: "mp4",
                 Type: "Video",
                 VideoCodec: "h264",
-                AudioCodec: "aac,mp3",
+                AudioCodec: "ac3,aac,mp3",
                 Context: "Streaming",
                 Protocol: "http",
-                MaxAudioChannels: "2",
+                MaxAudioChannels: "6",
               });
             }
             return profile;
