@@ -476,96 +476,32 @@ async fn wake_on_lan(
         .unwrap_or(false)
 }
 
-/// Injected (Raspberry Pi only) before any page script. Two fixes for smooth
-/// video playback:
+/// Raspberry Pi device profile, served over `embyhost://` and loaded through
+/// `appStartInfo.plugins` (the same mechanism the official Theater apps use).
+/// It replaces the client's `browserdeviceprofile.js` builder wholesale by
+/// overriding the player's `getDeviceProfile`, so there is no `canPlayType`
+/// probing and no `Emby.importModule` wrapping. The profile is a static object
+/// captured from the client's own builder running on this exact WebKitGTK
+/// build, then tuned for the Pi's hardware:
 ///
-/// 1. HEVC/AV1: WebKitGTK's GStreamer backend reports these playable because a
-///    decoder element exists, but the Pi has no HEVC or AV1 hardware block, so
-///    those paths are software-only and stutter. Returning "" for the HEVC and
-///    AV1 codec families makes the client's device-profile builder
-///    (browserdeviceprofile.js, via player.getDeviceProfile) omit them from the
-///    direct-play list, so the server transcodes to H.264, which the Pi decodes
-///    in hardware. The profile's AV1 support is gated solely on the
-///    canPlayType probe 'video/mp4; codecs="av01.0.00M.08"'. H.264/VP9
-///    detection (avc1/vp09) is untouched.
+/// - Direct play H.264/VP8/VP9 (the vc4 block decodes them), but NOT HEVC or
+///   AV1 — the Pi 4 has no hardware block for either, so omitting them makes
+///   the server transcode to H.264, which the Pi decodes in hardware.
+/// - The first video TranscodingProfile is a progressive Matroska stream: the
+///   server emits /videos/…/stream.mkv and GStreamer plays it in hardware via a
+///   plain video.src. HLS is unplayable in this webview (hls.js/MSE throws
+///   mediadecodeerror, native HLS throws "no compatible streams"). Matroska,
+///   not MP4, because ffmpeg cannot mux AC3/E-AC3 into MP4 (its encoder is
+///   experimental there) — an MP4 profile fails the transcode for any title
+///   with AC3/E-AC3 audio, which the client reports as "no streams available".
 ///
-/// 2. Transcode container: the server delivers the transcode as HLS, which this
-///    webview cannot play — hls.js over MSE throws mediadecodeerror, and native
-///    (GStreamer) HLS throws "no compatible streams". It does, however, play a
-///    progressive stream in hardware (verified: /videos/…/stream.mkv reaches
-///    PLAYING on v4l2h264dec). The client's profile builder only offers HLS as a
-///    video *streaming* profile, so we wrap Emby.importModule to prepend one;
-///    the server picks the first match and emits a progressive file the player
-///    loads with a plain video.src (no HLS).
-///
-///    The container must be Matroska, not MP4: ffmpeg cannot mux AC3/E-AC3 into
-///    MP4 (its encoder is experimental there), so an MP4 profile makes the
-///    transcode die with "Could not write header for output file #0 (incorrect
-///    codec parameters ?): Invalid argument", which the client reports as "no
-///    streams available" for any HEVC title with AC3/E-AC3 audio. Matroska
-///    carries them natively, and GStreamer's matroskademux reads them fine.
-///
-///    NOTE: the server must have transcode THROTTLING enabled (Dashboard ->
-///    Playback -> Transcoding). Unthrottled, ffmpeg writes the whole film to a
-///    temp file as fast as it can encode (observed speed=15.9x, throttle=off —
-///    4.9 GB in about 5 minutes) and the webview happily buffers that firehose
-///    until the kernel OOM-kills the WebKit web process, which looks like
-///    playback freezing. Throttled it runs at ~1.3x and swap stays empty.
-///    Setting EnableStreamBuffering=false on the profile does NOT achieve this:
-///    this Emby build ignores it and still runs unthrottled (verified).
-const PI_PLAYBACK_JS: &str = r#"(function () {
-  var proto = HTMLMediaElement.prototype;
-  var orig = proto.canPlayType;
-  // HEVC family + AV1: no hardware decoder on the Pi, so report unsupported
-  // and let the server transcode to H.264 instead of stuttering in software.
-  var noHwDecode = /hvc1|hev1|dvh1|dvhe|hevc|av01/i;
-  proto.canPlayType = function (type) {
-    if (typeof type === "string" && noHwDecode.test(type)) return "";
-    return orig.call(this, type);
-  };
-  // Prepend a progressive Matroska streaming profile so the server transcodes
-  // to stream.mkv (hardware-decodable, and the only container that carries
-  // AC3/E-AC3) instead of HLS (unplayable here). Patch lazily by wrapping
-  // Emby.importModule — the player calls it for the profile builder at playback
-  // time. (Requiring the module early would evaluate its connectionmanager.js
-  // dependency before the service locator is initialized and break startup.)
-  function wrapImport() {
-    if (!(window.Emby && typeof Emby.importModule === "function")) {
-      setTimeout(wrapImport, 50);
-      return;
-    }
-    if (Emby.__piWrapped) return;
-    Emby.__piWrapped = true;
-    var origImport = Emby.importModule;
-    Emby.importModule = function (path) {
-      var p = origImport.call(Emby, path);
-      if (String(path).indexOf("browserdeviceprofile") < 0) return p;
-      return p.then(function (builder) {
-        if (typeof builder !== "function" || builder.__piProfile) return builder;
-        var wrapped = function (options) {
-          return Promise.resolve(builder(options)).then(function (profile) {
-            if (profile && profile.TranscodingProfiles) {
-              profile.TranscodingProfiles.unshift({
-                Container: "mkv",
-                Type: "Video",
-                VideoCodec: "h264",
-                AudioCodec: "ac3,eac3,aac,mp3",
-                Context: "Streaming",
-                Protocol: "http",
-                MaxAudioChannels: "6",
-              });
-            }
-            return profile;
-          });
-        };
-        wrapped.__piProfile = true;
-        return wrapped;
-      });
-    };
-  }
-  wrapImport();
-})();
-"#;
+/// NOTE: the server must have transcode THROTTLING enabled (Dashboard ->
+/// Playback -> Transcoding). Unthrottled, ffmpeg writes the whole film to a
+/// temp file as fast as it can encode (observed speed=15.9x, throttle=off —
+/// 4.9 GB in about 5 minutes) and the webview buffers that firehose until the
+/// kernel OOM-kills the WebKit web process, which looks like playback freezing.
+/// Throttled it runs at ~1.3x and swap stays empty.
+const PI_DEVICE_PROFILE_JS: &str = include_str!("pi_device_profile.js");
 
 /// AMD module served over the `embyhost://` custom protocol and referenced from
 /// `appStartInfo.paths.serverdiscovery`. The client's loader resolves it instead
@@ -1044,6 +980,9 @@ pub fn run() {
                 "/cec.js" => (CEC_JS.as_bytes(), "application/javascript"),
                 "/cec/cec.js" => (CEC_PAGE_JS.as_bytes(), "application/javascript"),
                 "/cec/cec.html" => (CEC_PAGE_HTML.as_bytes(), "text/html"),
+                "/pi_device_profile.js" => {
+                    (PI_DEVICE_PROFILE_JS.as_bytes(), "application/javascript")
+                }
                 _ => (SERVER_DISCOVERY_JS.as_bytes(), "application/javascript"),
             };
             tauri::http::Response::builder()
@@ -1095,6 +1034,14 @@ pub fn run() {
             // Injected before any page script runs, so the Emby app sees
             // window.appStartInfo on first load. Once the page's Emby.App is
             // ready, we start the app ourselves with the injected info.
+            // On the Pi, also load the static device-profile plugin (see
+            // PI_DEVICE_PROFILE_JS) through the same plugin mechanism the
+            // official Theater apps use.
+            let profile_plugin = if is_raspberry_pi() {
+                ", \"embyhost://host/pi_device_profile.js\""
+            } else {
+                ""
+            };
             let start_info = format!(
                 r#"window.appStartInfo = Object.assign({{
   environment: "emby-theater",
@@ -1113,7 +1060,7 @@ pub fn run() {
     wakeonlan: "embyhost://host/wakeonlan.js",
     apphost: "embyhost://host/apphost.js",
   }},
-  plugins: ["embyhost://host/cec.js"],
+  plugins: ["embyhost://host/cec.js"{profile_plugin}],
 }}, window.appStartInfo || {{}});
 (function startEmby() {{
   if (window.Emby && window.Emby.App && typeof window.Emby.App.start === "function") {{
@@ -1150,7 +1097,7 @@ pub fn run() {
 }})();"#
             );
 
-            let mut builder = WebviewWindowBuilder::new(
+            let builder = WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::External(EMBY_URL.parse::<tauri::Url>().unwrap()),
@@ -1161,11 +1108,6 @@ pub fn run() {
             .center()
             .fullscreen(fullscreen)
             .initialization_script(&start_info);
-            if is_raspberry_pi() {
-                // HEVC is software-only here (transcode it to H.264) and the
-                // transcode must be progressive Matroska, not HLS (see above).
-                builder = builder.initialization_script(PI_PLAYBACK_JS);
-            }
             let window = builder.build()?;
 
             // wry registers custom schemes as secure but NOT CORS-enabled, and
