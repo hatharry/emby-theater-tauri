@@ -491,12 +491,18 @@ async fn wake_on_lan(
 /// 2. Transcode container: the server delivers the transcode as HLS, which this
 ///    webview cannot play — hls.js over MSE throws mediadecodeerror, and native
 ///    (GStreamer) HLS throws "no compatible streams". It does, however, play a
-///    progressive MP4 in hardware (verified: /videos/…/stream.mp4 reaches
+///    progressive stream in hardware (verified: /videos/…/stream.mkv reaches
 ///    PLAYING on v4l2h264dec). The client's profile builder only offers HLS as a
-///    video *streaming* profile, so we wrap Emby.importModule to prepend an MP4
-///    streaming profile to the builder's result; the server picks the first
-///    match and emits stream.mp4, which the player loads with a plain
-///    video.src (no HLS).
+///    video *streaming* profile, so we wrap Emby.importModule to prepend one;
+///    the server picks the first match and emits a progressive file the player
+///    loads with a plain video.src (no HLS).
+///
+///    The container must be Matroska, not MP4: ffmpeg cannot mux AC3/E-AC3 into
+///    MP4 (its encoder is experimental there), so an MP4 profile makes the
+///    transcode die with "Could not write header for output file #0 (incorrect
+///    codec parameters ?): Invalid argument", which the client reports as "no
+///    streams available" for any HEVC title with AC3/E-AC3 audio. Matroska
+///    carries them natively, and GStreamer's matroskademux reads them fine.
 const PI_PLAYBACK_JS: &str = r#"(function () {
   var proto = HTMLMediaElement.prototype;
   var orig = proto.canPlayType;
@@ -505,12 +511,12 @@ const PI_PLAYBACK_JS: &str = r#"(function () {
     if (typeof type === "string" && hevc.test(type)) return "";
     return orig.call(this, type);
   };
-  // Prepend a progressive-MP4 streaming profile so the server transcodes to
-  // stream.mp4 (hardware-decodable) instead of HLS (unplayable here). Patch
-  // lazily by wrapping Emby.importModule — the player calls it for the profile
-  // builder at playback time. (Requiring the module early would evaluate its
-  // connectionmanager.js dependency before the service locator is initialized
-  // and break startup.)
+  // Prepend a progressive Matroska streaming profile so the server transcodes
+  // to stream.mkv (hardware-decodable, and the only container that carries
+  // AC3/E-AC3) instead of HLS (unplayable here). Patch lazily by wrapping
+  // Emby.importModule — the player calls it for the profile builder at playback
+  // time. (Requiring the module early would evaluate its connectionmanager.js
+  // dependency before the service locator is initialized and break startup.)
   function wrapImport() {
     if (!(window.Emby && typeof Emby.importModule === "function")) {
       setTimeout(wrapImport, 50);
@@ -528,10 +534,10 @@ const PI_PLAYBACK_JS: &str = r#"(function () {
           return Promise.resolve(builder(options)).then(function (profile) {
             if (profile && profile.TranscodingProfiles) {
               profile.TranscodingProfiles.unshift({
-                Container: "mp4",
+                Container: "mkv",
                 Type: "Video",
                 VideoCodec: "h264",
-                AudioCodec: "ac3,aac,mp3",
+                AudioCodec: "ac3,eac3,aac,mp3",
                 Context: "Streaming",
                 Protocol: "http",
                 MaxAudioChannels: "6",
@@ -1145,7 +1151,7 @@ pub fn run() {
             .initialization_script(&start_info);
             if is_raspberry_pi() {
                 // HEVC is software-only here (transcode it to H.264) and the
-                // transcode must be progressive MP4, not HLS (see above).
+                // transcode must be progressive Matroska, not HLS (see above).
                 builder = builder.initialization_script(PI_PLAYBACK_JS);
             }
             let window = builder.build()?;
