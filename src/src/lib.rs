@@ -479,14 +479,15 @@ async fn wake_on_lan(
 /// Injected (Raspberry Pi only) before any page script. Two fixes for smooth
 /// video playback:
 ///
-/// 1. HEVC: WebKitGTK's GStreamer backend reports HEVC playable because a
-///    decoder element exists, but the Pi has no HEVC hardware block, so that
-///    path is software-only and stutters. Returning "" for the HEVC codec
-///    family makes the client's device-profile builder
-///    (browserdeviceprofile.js, via player.getDeviceProfile) omit HEVC from the
+/// 1. HEVC/AV1: WebKitGTK's GStreamer backend reports these playable because a
+///    decoder element exists, but the Pi has no HEVC or AV1 hardware block, so
+///    those paths are software-only and stutter. Returning "" for the HEVC and
+///    AV1 codec families makes the client's device-profile builder
+///    (browserdeviceprofile.js, via player.getDeviceProfile) omit them from the
 ///    direct-play list, so the server transcodes to H.264, which the Pi decodes
-///    in hardware. H.264/VP9/AV1 detection (avc1/vp09/av01) is untouched: none
-///    of those fourccs contain an HEVC token.
+///    in hardware. The profile's AV1 support is gated solely on the
+///    canPlayType probe 'video/mp4; codecs="av01.0.00M.08"'. H.264/VP9
+///    detection (avc1/vp09) is untouched.
 ///
 /// 2. Transcode container: the server delivers the transcode as HLS, which this
 ///    webview cannot play — hls.js over MSE throws mediadecodeerror, and native
@@ -506,9 +507,11 @@ async fn wake_on_lan(
 const PI_PLAYBACK_JS: &str = r#"(function () {
   var proto = HTMLMediaElement.prototype;
   var orig = proto.canPlayType;
-  var hevc = /hvc1|hev1|dvh1|dvhe|hevc/i;
+  // HEVC family + AV1: no hardware decoder on the Pi, so report unsupported
+  // and let the server transcode to H.264 instead of stuttering in software.
+  var noHwDecode = /hvc1|hev1|dvh1|dvhe|hevc|av01/i;
   proto.canPlayType = function (type) {
-    if (typeof type === "string" && hevc.test(type)) return "";
+    if (typeof type === "string" && noHwDecode.test(type)) return "";
     return orig.call(this, type);
   };
   // Prepend a progressive Matroska streaming profile so the server transcodes
