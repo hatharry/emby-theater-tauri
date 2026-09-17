@@ -504,6 +504,15 @@ async fn wake_on_lan(
 ///    codec parameters ?): Invalid argument", which the client reports as "no
 ///    streams available" for any HEVC title with AC3/E-AC3 audio. Matroska
 ///    carries them natively, and GStreamer's matroskademux reads them fine.
+///
+///    NOTE: the server must have transcode THROTTLING enabled (Dashboard ->
+///    Playback -> Transcoding). Unthrottled, ffmpeg writes the whole film to a
+///    temp file as fast as it can encode (observed speed=15.9x, throttle=off —
+///    4.9 GB in about 5 minutes) and the webview happily buffers that firehose
+///    until the kernel OOM-kills the WebKit web process, which looks like
+///    playback freezing. Throttled it runs at ~1.3x and swap stays empty.
+///    Setting EnableStreamBuffering=false on the profile does NOT achieve this:
+///    this Emby build ignores it and still runs unthrottled (verified).
 const PI_PLAYBACK_JS: &str = r#"(function () {
   var proto = HTMLMediaElement.prototype;
   var orig = proto.canPlayType;
