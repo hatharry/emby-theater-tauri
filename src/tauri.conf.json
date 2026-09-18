@@ -29,7 +29,7 @@
     ],
     "linux": {
       "deb": {
-        "desktopTemplate": "./EmbyTheater.desktop",
+        "desktopTemplate": "./emby-theater.desktop",
         "depends": [
           "gstreamer1.0-plugins-base",
           "gstreamer1.0-plugins-good",
