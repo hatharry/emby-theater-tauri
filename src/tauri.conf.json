@@ -38,6 +38,16 @@
           "gstreamer1.0-vaapi",
           "cec-utils"
         ]
+      },
+      "rpm": {
+        "desktopTemplate": "./emby-theater.desktop",
+        "depends": [
+          "gstreamer1-plugins-base",
+          "gstreamer1-plugins-good",
+          "gstreamer1-plugins-bad-free",
+          "gstreamer1-libav",
+          "libcec"
+        ]
       }
     }
   }

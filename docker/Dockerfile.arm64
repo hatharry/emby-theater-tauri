@@ -19,7 +19,7 @@ FROM --platform=linux/arm64 ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Toolchain + Tauri system dependencies (same set as Dockerfile.test; all are
+# Toolchain + Tauri system dependencies (same set as Dockerfile.amd64; all are
 # available for arm64, including gstreamer1.0-vaapi and cec-utils).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates gnupg build-essential pkg-config \

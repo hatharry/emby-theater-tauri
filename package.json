@@ -6,10 +6,11 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "node scripts/build-debs.mjs",
+    "build": "npm run build:amd64 && npm run build:arm64 && npm run build:armhf",
     "build:native": "tauri build",
-    "build:arm64": "node scripts/build-debs.mjs --arm64-only",
-    "build:armhf": "node scripts/build-debs.mjs --armhf-only",
+    "build:amd64": "node scripts/build-amd64.mjs",
+    "build:arm64": "node scripts/build-arm64.mjs",
+    "build:armhf": "node scripts/build-armhf.mjs",
     "icon": "node scripts/make-icon.mjs && tauri icon src/app-icon.png"
   },
   "devDependencies": {
