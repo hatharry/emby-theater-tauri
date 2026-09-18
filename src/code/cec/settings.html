@@ -1,0 +1,28 @@
+<div is="emby-scroller" class="view flex flex-direction-column scrollFrameY flex-grow" data-mousewheel="true" data-horizontal="false" data-forcescrollbar="true" data-centerfocus="card" data-bindheader="true">
+  <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
+    <form class="auto-center">
+      <div class="selectContainer">
+        <select is="emby-select" class="hdmiPort" label="HDMI port:">
+          <option value="">Auto</option>
+          <option>1</option>
+          <option>2</option>
+          <option>3</option>
+          <option>4</option>
+          <option>5</option>
+          <option>6</option>
+          <option>7</option>
+          <option>8</option>
+          <option>9</option>
+          <option>10</option>
+        </select>
+      </div>
+      <div class="selectContainer">
+        <select is="emby-select" class="cecDevice" label="CEC adapter:">
+          <option value="">Auto</option>
+        </select>
+      </div>
+      <div class="fieldDescription">Select the HDMI input on your TV that this computer is connected to, so the TV remote's buttons reach the app over CEC. Leave on Auto to detect.</div>
+      <div class="fieldDescription">On boards with one CEC adapter per HDMI port (e.g. Raspberry Pi 4), pick the adapter the TV is cabled to. Leave on Auto to probe.</div>
+    </form>
+  </div>
+</div>

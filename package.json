@@ -10,7 +10,7 @@
     "build:native": "tauri build",
     "build:arm64": "node scripts/build-debs.mjs --arm64-only",
     "build:armhf": "node scripts/build-debs.mjs --armhf-only",
-    "icon": "node scripts/make-icon.mjs && tauri icon app-icon.png"
+    "icon": "node scripts/make-icon.mjs && tauri icon src/app-icon.png"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

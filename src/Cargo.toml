@@ -17,6 +17,11 @@ hostname = "0.4"
 webkit2gtk = { version = "2", features = ["v2_40"] }
 gtk = "0.18"
 
+[[bin]]
+name = "embytheater"
+path = "code/main.rs"
+
 [lib]
 name = "embytheater_lib"
+path = "code/lib.rs"
 crate-type = ["staticlib", "cdylib", "rlib"]

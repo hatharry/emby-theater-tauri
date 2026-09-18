@@ -5,7 +5,7 @@
   "identifier": "tv.emby.theater.tauri",
   "mainBinaryName": "emby-theater",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "./ui"
   },
   "app": {
     "windows": [],
