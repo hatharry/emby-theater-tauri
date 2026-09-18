@@ -110,7 +110,7 @@ define(
       Container: "mkv",
       Type: "Video",
       VideoCodec: "h264",
-      AudioCodec: "ac3,eac3,aac,mp3",
+      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis",
       Context: "Streaming",
       Protocol: "http",
       MaxAudioChannels: "6"
