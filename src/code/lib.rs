@@ -10,6 +10,7 @@ mod assets;
 mod cec;
 mod discovery;
 mod platform;
+mod power;
 
 use std::fs;
 
@@ -59,6 +60,18 @@ async fn wake_on_lan(
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+/// Power off the whole machine (client back menu -> appHost.shutdown).
+#[tauri::command]
+fn shutdown_system() -> bool {
+    power::shutdown()
+}
+
+/// Reboot the whole machine (client back menu -> appHost.restart).
+#[tauri::command]
+fn restart_system() -> bool {
+    power::restart()
 }
 
 /// Drain queued CEC keypresses for the page plugin.
@@ -176,6 +189,8 @@ pub fn run() {
             discover_servers,
             wake_on_lan,
             quit_app,
+            shutdown_system,
+            restart_system,
             set_layout_mode,
             cec_poll,
             cec_set_hdmi_port,

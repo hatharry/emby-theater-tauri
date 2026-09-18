@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shutdown-system"
+description = "Enables the shutdown_system command without any pre-configured scope."
+commands.allow = ["shutdown_system"]
+
+[[permission]]
+identifier = "deny-shutdown-system"
+description = "Denies the shutdown_system command without any pre-configured scope."
+commands.deny = ["shutdown_system"]

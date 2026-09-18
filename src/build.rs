@@ -7,6 +7,8 @@ fn main() {
                 "discover_servers",
                 "wake_on_lan",
                 "quit_app",
+                "shutdown_system",
+                "restart_system",
                 "set_layout_mode",
                 "cec_poll",
                 "cec_set_hdmi_port",

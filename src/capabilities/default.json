@@ -8,6 +8,8 @@
     "allow-discover-servers",
     "allow-wake-on-lan",
     "allow-quit-app",
+    "allow-shutdown-system",
+    "allow-restart-system",
     "allow-set-layout-mode",
     "allow-cec-poll",
     "allow-cec-set-hdmi-port",
