@@ -4,6 +4,7 @@ fn main() {
             // Generate ACL permissions (allow-<command>) so the remote Emby URL
             // can invoke these app commands via a capability's `remote` context.
             tauri_build::AppManifest::new().commands(&[
+                "emby_url",
                 "discover_servers",
                 "wake_on_lan",
                 "quit_app",

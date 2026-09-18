@@ -251,7 +251,13 @@ pub fn run() {
             let builder = WebviewWindowBuilder::new(
                 app,
                 "main",
-                WebviewUrl::External(EMBY_URL.parse::<tauri::Url>().unwrap()),
+                // Local splash (ui/index.html, a copy of Emby's own loading
+                // screen) navigates to EMBY_URL via the emby_url command. The
+                // webview keeps painting the splash until the remote document
+                // commits, covering the initial network fetch; Emby's own
+                // splash then takes over. WebKit re-runs the injected
+                // appStartInfo script on that navigation.
+                WebviewUrl::App("index.html".into()),
             )
             .title("Emby Theater")
             .inner_size(1280.0, 720.0)

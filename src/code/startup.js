@@ -28,6 +28,10 @@ window.appStartInfo = Object.assign({
 // TV layout. Only an explicit "tv" counts: empty/auto resolves to the
 // desktop/mobile layout, which runs in a normal window.
 (function () {
+  // Skip the local splash page: its (empty) localStorage is a different origin
+  // from the client's, and reporting "normal" from it would wrongly shrink a
+  // TV-mode window before the remote page even loads.
+  if (!/\.emby\.media$/.test(location.hostname)) return;
   function send() {
     try {
       var l = localStorage.getItem("layout");

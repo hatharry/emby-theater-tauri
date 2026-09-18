@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "allow-emby-url",
     "allow-discover-servers",
     "allow-wake-on-lan",
     "allow-quit-app",

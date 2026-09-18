@@ -2,9 +2,80 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>EmbyTheater</title>
+    <title>Emby Theater</title>
+    <style>
+      /* Copied from Emby's own loading screen (tv.emby.media/index.html). */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+      }
+
+      .app-splash-container {
+        background-color: #000;
+        position: fixed;
+        z-index: 99999;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        contain: strict;
+      }
+
+      .app-splash {
+        background-image: url(logowhite.png);
+        background-position: center top;
+        background-repeat: no-repeat;
+        background-size: contain;
+        position: fixed;
+        top: 1.8em;
+        left: 0.9em;
+        width: 6.6em;
+        height: 2em;
+        contain: strict;
+        z-index: 99999;
+      }
+
+      .app-splash-expanded {
+        top: 30%;
+        left: 30%;
+        right: 30%;
+        height: 20%;
+        width: auto;
+      }
+
+      @media (orientation: landscape) {
+        .app-splash-expanded {
+          left: 37.5%;
+          right: 37.5%;
+        }
+      }
+    </style>
   </head>
   <body>
-    <!-- Placeholder; the main window loads https://app.emby.media directly. -->
+    <div class="app-splash-container">
+      <div class="app-splash app-splash-expanded"></div>
+    </div>
+    <script>
+      // The window now starts on this local splash instead of the remote URL,
+      // so the injected appStartInfo script (initialization_script) never ran
+      // here. Ask the native side for the client URL and navigate to it; the
+      // injection re-applies on that load and Emby.App.start proceeds as
+      // before. Until the remote page paints, this splash stays visible.
+      (function () {
+        var FALLBACK = "http://tv.emby.media/index.html?autostart=false";
+        function go(url) {
+          window.location.replace(url || FALLBACK);
+        }
+        try {
+          var p = window.__TAURI_INTERNALS__.invoke("emby_url");
+          if (p && p.then) p.then(go, function () { go(FALLBACK); });
+          else go(FALLBACK);
+        } catch (e) {
+          go(FALLBACK);
+        }
+      })();
+    </script>
   </body>
 </html>
