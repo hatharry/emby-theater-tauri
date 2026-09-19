@@ -167,15 +167,6 @@ define(
       Context: "Streaming",
       Protocol: "http",
       MaxAudioChannels: "2"
-    },
-    {
-      Container: "mkv",
-      Type: "Video",
-      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis",
-      VideoCodec: "h264,vp8,vp9,av1,hevc",
-      Context: "Static",
-      MaxAudioChannels: "2",
-      CopyTimestamps: true
     }
   ],
   ContainerProfiles: [],
