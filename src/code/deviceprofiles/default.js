@@ -233,7 +233,41 @@ define(
       ]
     }
   ],
+  // Subtitle handling verified empirically against this engine (WebKitGTK
+  // 2.52 + GStreamer) by muxing/generating each format and playing it, and
+  // cross-checked against the client's own browserdeviceprofile builder:
+  // - Embedded text tracks (mov_text in mp4; subrip/ass/ssa in mkv) are
+  //   exposed on video.textTracks and rendered by the client's own path, so
+  //   direct-play carries them with no profile entry needed. webvtt muxed
+  //   into mkv is NOT exposed by GStreamer, but that is rare in practice.
+  // - For EXTERNAL subs the client does not use native <track>: it fetches
+  //   the DeliveryUrl and parses it itself. vtt goes through its bundled
+  //   webvtt parser (modules/webvtt/vtt.js), which REQUIRES a WEBVTT
+  //   signature, and ass/ssa go through SubtitlesOctopus (a canvas renderer
+  //   loaded when window.Worker + canvas 2d exist, both true here). Feeding
+  //   raw srt/subviewer/microdvd to <track> or to the strict parser fails,
+  //   so we advertise ONLY vtt/ass/ssa External. The server then converts
+  //   any other subtitle to vtt for us.
+  // - MediaSource is present in this webview, so the client's
+  //   enableHlsJsPlayer() returns true and its builder also emits the HLS
+  //   subtitle set (vtt/Hls + eia_608/708 VideoSideData). We mirror that so
+  //   embedded/HLS-delivered captions match what the builder would have
+  //   produced. This whole set is identical to the Pi profile's subtitles.
   SubtitleProfiles: [
+    {
+      Format: "vtt",
+      Method: "Hls"
+    },
+    {
+      Format: "eia_608",
+      Method: "VideoSideData",
+      Protocol: "hls"
+    },
+    {
+      Format: "eia_708",
+      Method: "VideoSideData",
+      Protocol: "hls"
+    },
     {
       Format: "vtt",
       Method: "External",
@@ -246,11 +280,6 @@ define(
     },
     {
       Format: "ssa",
-      Method: "External",
-      AllowChunkedResponse: true
-    },
-    {
-      Format: "srt",
       Method: "External",
       AllowChunkedResponse: true
     }
