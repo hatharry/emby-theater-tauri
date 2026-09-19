@@ -23,6 +23,10 @@ define(
     //   no HLS video profile is offered.
     // - AC3/E-AC3 direct-play only in Matroska (ffmpeg cannot mux them into
     //   MP4); in MP4 they need the transcode path.
+    // - One entry per container: each lists the UNION of the video and audio
+    //   codecs that passed for that container. HEVC and AV1 direct-play here
+    //   (software decode) — unlike the Pi profile, which omits them so the
+    //   server transcodes to H.264.
     var PROFILE = {
   MaxStaticBitrate: 200000000,
   MaxStreamingBitrate: 200000000,
@@ -31,62 +35,32 @@ define(
     {
       Container: "mp4,m4v",
       Type: "Video",
-      VideoCodec: "h264",
+      VideoCodec: "h264,hevc,mpeg2video,mpeg4",
       AudioCodec: "aac,ac3,alac,flac,mp3"
     },
     {
-      Container: "mp4,m4v",
-      Type: "Video",
-      VideoCodec: "hevc,mpeg2video,mpeg4",
-      AudioCodec: "aac"
-    },
-    {
       Container: "mkv",
       Type: "Video",
-      VideoCodec: "h264",
+      VideoCodec: "h264,hevc,av1,vp8,vp9,mpeg2video,mpeg4",
       AudioCodec: "aac,ac3,eac3,flac,mp3,opus,pcm_s16le,vorbis"
     },
     {
-      Container: "mkv",
-      Type: "Video",
-      VideoCodec: "av1,hevc,mpeg2video,mpeg4,vp8,vp9",
-      AudioCodec: "aac"
-    },
-    {
       Container: "webm",
       Type: "Video",
-      VideoCodec: "vp9",
+      VideoCodec: "vp8,vp9,av1",
       AudioCodec: "opus,vorbis"
     },
     {
-      Container: "webm",
-      Type: "Video",
-      VideoCodec: "av1,vp8",
-      AudioCodec: "opus"
-    },
-    {
       Container: "ts",
       Type: "Video",
-      VideoCodec: "h264",
+      VideoCodec: "h264,hevc,mpeg2video",
       AudioCodec: "aac,ac3,mp3"
     },
     {
-      Container: "ts",
-      Type: "Video",
-      VideoCodec: "hevc,mpeg2video",
-      AudioCodec: "aac"
-    },
-    {
       Container: "mov",
       Type: "Video",
-      VideoCodec: "h264",
+      VideoCodec: "h264,hevc,mpeg4",
       AudioCodec: "aac,alac,pcm_s16le"
-    },
-    {
-      Container: "mov",
-      Type: "Video",
-      VideoCodec: "hevc,mpeg4",
-      AudioCodec: "aac"
     },
     {
       Container: "flv",
@@ -97,14 +71,8 @@ define(
     {
       Container: "avi",
       Type: "Video",
-      VideoCodec: "mpeg4",
+      VideoCodec: "h264,mpeg2video,mpeg4",
       AudioCodec: "mp3,pcm_s16le"
-    },
-    {
-      Container: "avi",
-      Type: "Video",
-      VideoCodec: "h264,mpeg2video",
-      AudioCodec: "mp3"
     },
     {
       Container: "3gp",
