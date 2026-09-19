@@ -27,6 +27,8 @@ define(
     //   codecs that passed for that container. HEVC and AV1 direct-play here
     //   (software decode) — unlike the Pi profile, which omits them so the
     //   server transcodes to H.264.
+    // - DTS (dca) decodes in real time via GStreamer's dtsdec/avdec_dca, so it
+    //   direct-plays in every container that carries it (verified by playback).
     var PROFILE = {
   MaxStaticBitrate: 200000000,
   MaxStreamingBitrate: 200000000,
@@ -36,13 +38,13 @@ define(
       Container: "mp4,m4v",
       Type: "Video",
       VideoCodec: "h264,hevc,mpeg2video,mpeg4",
-      AudioCodec: "aac,ac3,alac,flac,mp3"
+      AudioCodec: "aac,ac3,alac,flac,mp3,dts"
     },
     {
       Container: "mkv",
       Type: "Video",
       VideoCodec: "h264,hevc,av1,vp8,vp9,mpeg2video,mpeg4",
-      AudioCodec: "aac,ac3,eac3,flac,mp3,opus,pcm_s16le,vorbis"
+      AudioCodec: "aac,ac3,eac3,flac,mp3,opus,pcm_s16le,vorbis,dts"
     },
     {
       Container: "webm",
@@ -54,13 +56,13 @@ define(
       Container: "ts",
       Type: "Video",
       VideoCodec: "h264,hevc,mpeg2video",
-      AudioCodec: "aac,ac3,mp3"
+      AudioCodec: "aac,ac3,mp3,dts"
     },
     {
       Container: "mov",
       Type: "Video",
       VideoCodec: "h264,hevc,mpeg4",
-      AudioCodec: "aac,alac,pcm_s16le"
+      AudioCodec: "aac,alac,pcm_s16le,dts"
     },
     {
       Container: "flv",
@@ -124,6 +126,11 @@ define(
       Container: "mp4",
       Type: "Audio",
       AudioCodec: "aac,alac"
+    },
+    {
+      Container: "dts",
+      Type: "Audio",
+      AudioCodec: "dts"
     }
   ],
   TranscodingProfiles: [
