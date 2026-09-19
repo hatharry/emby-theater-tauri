@@ -4,13 +4,20 @@ define(
     "modules/htmlvideoplayer/plugin.js",
   ],
   function (baseMod, playerMod) {
-    // Static device profile for the Raspberry Pi. Captured from the client's own
-    // browserdeviceprofile builder running on this exact WebKitGTK build, then
-    // adjusted for the Pi's hardware: H.264/VP8/VP9 direct-play (vc4 decodes
-    // them), but NO HEVC and NO AV1 (the Pi 4 has no block for either, so the
-    // server transcodes them to H.264). The first video TranscodingProfile is a
-    // progressive Matroska stream, which is what the server emits and GStreamer
-    // plays in hardware via a plain video.src (HLS is unplayable in this webview).
+    // Static device profile for the Raspberry Pi. Derived empirically on the
+    // Pi 4 itself: every container x codec combination was generated with
+    // ffmpeg and played through this exact WebKitGTK build (720p full matrix +
+    // 1080p video pass), keeping only combinations that PRESENTED >= 90% of
+    // their frames at real time with no MediaError. Excluded because they drop
+    // frames on the Pi 4 (measured at 1080p):
+    //   hevc        ~35% frames presented (no hw block; avdec_h265 can't keep up)
+    //   av1          ~2% (no hw block)
+    //   mpeg2video  ~47% (software decode too slow at 1080p)
+    //   alac        MediaError 4 (no ALAC decoder in this GStreamer build)
+    // Direct-play: h264 (vc4 hw), vp8/vp9/mpeg4 (verified at 1080p/720p).
+    // The first video TranscodingProfile is a progressive Matroska stream,
+    // which is what the server emits and GStreamer plays in hardware via a
+    // plain video.src (HLS is unplayable in this webview).
     //
     // This replaces the builder wholesale, so no canPlayType probing and no
     // Emby.importModule wrapping is needed. The server must have transcode
@@ -25,14 +32,32 @@ define(
     {
       Container: "mp4,m4v",
       Type: "Video",
-      VideoCodec: "h264,vp8,vp9",
-      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis"
+      VideoCodec: "h264,vp8,vp9,mpeg4",
+      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis,dts"
     },
     {
       Container: "mkv",
       Type: "Video",
-      VideoCodec: "h264,vp8,vp9",
-      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis"
+      VideoCodec: "h264,vp8,vp9,mpeg4",
+      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis,dts,pcm_s16le"
+    },
+    {
+      Container: "webm",
+      Type: "Video",
+      VideoCodec: "vp8,vp9",
+      AudioCodec: "opus,vorbis"
+    },
+    {
+      Container: "ts",
+      Type: "Video",
+      VideoCodec: "h264",
+      AudioCodec: "ac3,mp3,aac,dts"
+    },
+    {
+      Container: "mov",
+      Type: "Video",
+      VideoCodec: "h264,mpeg4",
+      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis,dts,pcm_s16le"
     },
     {
       Container: "flv",
@@ -43,13 +68,7 @@ define(
     {
       Container: "3gp",
       Type: "Video",
-      VideoCodec: "",
-      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis"
-    },
-    {
-      Container: "mov",
-      Type: "Video",
-      VideoCodec: "h264",
+      VideoCodec: "h264,mpeg4",
       AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis"
     },
     {
@@ -99,10 +118,9 @@ define(
       Type: "Audio"
     },
     {
-      Container: "webm",
-      Type: "Video",
-      AudioCodec: "vorbis,opus",
-      VideoCodec: "VP8,VP9"
+      Container: "dts",
+      Type: "Audio",
+      AudioCodec: "dts"
     }
   ],
   TranscodingProfiles: [
@@ -110,7 +128,7 @@ define(
       Container: "mkv",
       Type: "Video",
       VideoCodec: "h264",
-      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis",
+      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis,dts",
       Context: "Streaming",
       Protocol: "http",
       MaxAudioChannels: "6"
