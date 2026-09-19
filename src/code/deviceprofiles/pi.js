@@ -138,16 +138,6 @@ define(
       Type: "Audio",
       AudioCodec: "aac",
       Context: "Streaming",
-      Protocol: "hls",
-      MaxAudioChannels: "2",
-      MinSegments: "1",
-      BreakOnNonKeyFrames: true
-    },
-    {
-      Container: "aac",
-      Type: "Audio",
-      AudioCodec: "aac",
-      Context: "Streaming",
       Protocol: "http",
       MaxAudioChannels: "2"
     },
@@ -174,76 +164,6 @@ define(
       Context: "Streaming",
       Protocol: "http",
       MaxAudioChannels: "2"
-    },
-    {
-      Container: "opus",
-      Type: "Audio",
-      AudioCodec: "opus",
-      Context: "Static",
-      Protocol: "http",
-      MaxAudioChannels: "2"
-    },
-    {
-      Container: "mp3",
-      Type: "Audio",
-      AudioCodec: "mp3",
-      Context: "Static",
-      Protocol: "http",
-      MaxAudioChannels: "2"
-    },
-    {
-      Container: "aac",
-      Type: "Audio",
-      AudioCodec: "aac",
-      Context: "Static",
-      Protocol: "http",
-      MaxAudioChannels: "2"
-    },
-    {
-      Container: "wav",
-      Type: "Audio",
-      AudioCodec: "wav",
-      Context: "Static",
-      Protocol: "http",
-      MaxAudioChannels: "2"
-    },
-    {
-      Container: "mkv",
-      Type: "Video",
-      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis",
-      VideoCodec: "h264,vp8,vp9",
-      Context: "Static",
-      MaxAudioChannels: "2",
-      CopyTimestamps: true
-    },
-    {
-      Container: "ts",
-      Type: "Video",
-      AudioCodec: "ac3,mp3,aac",
-      VideoCodec: "h264",
-      Context: "Streaming",
-      Protocol: "hls",
-      MaxAudioChannels: "2",
-      MinSegments: "1",
-      BreakOnNonKeyFrames: true,
-      ManifestSubtitles: "vtt"
-    },
-    {
-      Container: "webm",
-      Type: "Video",
-      AudioCodec: "vorbis",
-      VideoCodec: "vpx",
-      Context: "Streaming",
-      Protocol: "http",
-      MaxAudioChannels: "2"
-    },
-    {
-      Container: "mp4",
-      Type: "Video",
-      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis",
-      VideoCodec: "h264",
-      Context: "Static",
-      Protocol: "http"
     }
   ],
   ContainerProfiles: [],
