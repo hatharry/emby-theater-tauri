@@ -387,8 +387,8 @@ mod tests {
     #[test]
     fn serves_both_device_profiles() {
         // The Pi and desktop profiles are distinct assets, each routed.
-        let (pi, pi_ct) = crate::assets::response_for("/pi_device_profile.js");
-        let (def, def_ct) = crate::assets::response_for("/default_device_profile.js");
+        let (pi, pi_ct) = crate::assets::response_for("/deviceprofiles/pi.js");
+        let (def, def_ct) = crate::assets::response_for("/deviceprofiles/default.js");
         assert_eq!(pi_ct, "application/javascript");
         assert_eq!(def_ct, "application/javascript");
         assert_ne!(pi, def, "pi and desktop profiles must differ");
@@ -400,12 +400,15 @@ mod tests {
     fn startup_selects_profile_by_platform() {
         let pi = crate::assets::startup_script("1.0", "did", "dev", true);
         let desktop = crate::assets::startup_script("1.0", "did", "dev", false);
-        assert!(pi.contains("pi_device_profile.js"), "pi uses the pi profile");
         assert!(
-            desktop.contains("default_device_profile.js"),
+            pi.contains("deviceprofiles/pi.js"),
+            "pi uses the pi profile"
+        );
+        assert!(
+            desktop.contains("deviceprofiles/default.js"),
             "desktop uses the empirically-derived profile"
         );
-        assert!(!pi.contains("default_device_profile.js"));
-        assert!(!desktop.contains("pi_device_profile.js"));
+        assert!(!pi.contains("deviceprofiles/default.js"));
+        assert!(!desktop.contains("deviceprofiles/pi.js"));
     }
 }
