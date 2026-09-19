@@ -29,6 +29,16 @@
 /// Throttled it runs at ~1.3x and swap stays empty.
 pub(crate) const PI_DEVICE_PROFILE_JS: &str = include_str!("./pi_device_profile.js");
 
+/// Desktop (amd64) device profile, served over `embyhost://` and loaded through
+/// `appStartInfo.plugins` on non-Pi builds. Its DirectPlayProfiles were derived
+/// empirically: every container x codec combination was generated with ffmpeg
+/// and played through this exact WebKitGTK+GStreamer engine (320x240 and
+/// 1280x720), keeping only the combinations that reach 'ended' at >= ~1x real
+/// time. Unlike the Pi, the desktop decodes HEVC/AV1 in software, so those
+/// direct-play instead of transcoding. Native HLS is unplayable here, so the
+/// first video TranscodingProfile is progressive Matroska.
+pub(crate) const DEFAULT_DEVICE_PROFILE_JS: &str = include_str!("./default_device_profile.js");
+
 /// AMD module served over the `embyhost://` custom protocol and referenced from
 /// `appStartInfo.paths.serverdiscovery`. The client's loader resolves it instead
 /// of its built-in no-op discovery module (browsers cannot UDP broadcast), and
@@ -85,6 +95,9 @@ pub(crate) fn response_for(path: &str) -> (&'static [u8], &'static str) {
         "/cec/cec.js" => (CEC_PAGE_JS.as_bytes(), "application/javascript"),
         "/cec/cec.html" => (CEC_PAGE_HTML.as_bytes(), "text/html"),
         "/pi_device_profile.js" => (PI_DEVICE_PROFILE_JS.as_bytes(), "application/javascript"),
+        "/default_device_profile.js" => {
+            (DEFAULT_DEVICE_PROFILE_JS.as_bytes(), "application/javascript")
+        }
         _ => (SERVER_DISCOVERY_JS.as_bytes(), "application/javascript"),
     }
 }
@@ -104,7 +117,7 @@ pub(crate) fn startup_script(version: &str, did: &str, device_name: &str, is_pi:
             if is_pi {
                 ", \"embyhost://host/pi_device_profile.js\""
             } else {
-                ""
+                ", \"embyhost://host/default_device_profile.js\""
             },
         )
 }

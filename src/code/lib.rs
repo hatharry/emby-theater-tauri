@@ -383,4 +383,29 @@ mod tests {
         println!("discovered: {servers:?}");
         assert!(!servers.is_empty(), "expected at least one server");
     }
+
+    #[test]
+    fn serves_both_device_profiles() {
+        // The Pi and desktop profiles are distinct assets, each routed.
+        let (pi, pi_ct) = crate::assets::response_for("/pi_device_profile.js");
+        let (def, def_ct) = crate::assets::response_for("/default_device_profile.js");
+        assert_eq!(pi_ct, "application/javascript");
+        assert_eq!(def_ct, "application/javascript");
+        assert_ne!(pi, def, "pi and desktop profiles must differ");
+        assert!(String::from_utf8_lossy(pi).contains("pideviceprofile"));
+        assert!(String::from_utf8_lossy(def).contains("defaultdeviceprofile"));
+    }
+
+    #[test]
+    fn startup_selects_profile_by_platform() {
+        let pi = crate::assets::startup_script("1.0", "did", "dev", true);
+        let desktop = crate::assets::startup_script("1.0", "did", "dev", false);
+        assert!(pi.contains("pi_device_profile.js"), "pi uses the pi profile");
+        assert!(
+            desktop.contains("default_device_profile.js"),
+            "desktop uses the empirically-derived profile"
+        );
+        assert!(!pi.contains("default_device_profile.js"));
+        assert!(!desktop.contains("pi_device_profile.js"));
+    }
 }
