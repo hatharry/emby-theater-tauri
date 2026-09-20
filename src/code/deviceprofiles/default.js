@@ -18,9 +18,15 @@ define(
     // - The desktop decodes H.264/HEVC/AV1/VP8/VP9/MPEG-4/MPEG-2 in software
     //   at real time, so all of them direct-play (unlike the Pi, which has no
     //   HEVC/AV1 block and must transcode those).
-    // - Native HLS (m3u8/ts) FAILS (MediaError 4) in this webview, so the
-    //   first video TranscodingProfile is a progressive Matroska stream, and
-    //   no HLS video profile is offered.
+    // - Native HLS via <video src=m3u8> FAILS (MediaError 4): GStreamer's
+    //   hlsdemux advertises no URI-handling capability, so WebKit's playbin
+    //   path cannot open a playlist. But the client does NOT use that path —
+    //   setCurrentSrc routes any .m3u8 through hls.js + MSE (MediaSource is
+    //   present, so enableHlsJsPlayer() is true), and hls.js plays the
+    //   server's HLS with the FULL seekable range (verified: dur=6168,
+    //   seekable 0-6168, no errors). So the first video TranscodingProfile is
+    //   HLS/ts, which gives reliable seeking (the progressive mkv/http path
+    //   suffers the WebKitGTK index-less seek clamp on some MKVs).
     // - AC3/E-AC3 direct-play only in Matroska (ffmpeg cannot mux them into
     //   MP4); in MP4 they need the transcode path.
     // - One entry per container: each lists the UNION of the video and audio
@@ -135,13 +141,15 @@ define(
   ],
   TranscodingProfiles: [
     {
-      Container: "mkv",
+      Container: "ts",
       Type: "Video",
       VideoCodec: "h264",
-      AudioCodec: "ac3,eac3,mp3,aac,opus,flac,vorbis",
+      AudioCodec: "aac,mp3,ac3",
+      Protocol: "hls",
       Context: "Streaming",
-      Protocol: "http",
-      MaxAudioChannels: "6"
+      MaxAudioChannels: "6",
+      MinSegments: "2",
+      BreakOnNonKeyFrames: true
     },
     {
       Container: "aac",
