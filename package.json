@@ -6,7 +6,7 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "npm run build:amd64 && npm run build:arm64 && npm run build:armhf",
+    "build": "node scripts/build-all.mjs",
     "build:native": "tauri build",
     "build:amd64": "node scripts/build-amd64.mjs",
     "build:arm64": "node scripts/build-arm64.mjs",
