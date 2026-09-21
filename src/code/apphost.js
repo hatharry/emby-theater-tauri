@@ -8,6 +8,11 @@ define(["modules/apphost.js"], function (mod) {
   if (info.appName) inner.appName = function () { return info.appName; };
   if (info.deviceName) inner.deviceName = function () { return info.deviceName; };
   if (info.appVersion) inner.appVersion = function () { return info.appVersion; };
+  // The web apphost picks the device icon from the browser user-agent too, so
+  // the server showed the Safari icon. Report the Emby logo instead.
+  inner.deviceIconUrl = function () {
+    return "https://github.com/MediaBrowser/Emby.Resources/raw/master/images/Logos/logoicon.png";
+  };
   var baseSupports = inner.supports;
   inner.supports = function (feature) {
     if (feature === "exit") return true;
