@@ -1,5 +1,6 @@
 window.appStartInfo = Object.assign({
   environment: "emby-theater",
+  appName: "Emby Theater",
   appVersion: "{version}",
   deviceId: "{did}",
   deviceName: "{device_name}",

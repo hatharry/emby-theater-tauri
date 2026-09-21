@@ -1,5 +1,13 @@
 define(["modules/apphost.js"], function (mod) {
   var inner = mod && mod.default ? mod.default : mod;
+  // The web apphost derives its identity from the browser user-agent (so the
+  // server shows "Safari" / "Emby Web" / the web bundle's version) and ignores
+  // appStartInfo. Override the identity getters to report this native app
+  // instead: Client="Emby Theater", DeviceName=<hostname>, Version=<app ver>.
+  var info = window.appStartInfo || {};
+  if (info.appName) inner.appName = function () { return info.appName; };
+  if (info.deviceName) inner.deviceName = function () { return info.deviceName; };
+  if (info.appVersion) inner.appVersion = function () { return info.appVersion; };
   var baseSupports = inner.supports;
   inner.supports = function (feature) {
     if (feature === "exit") return true;

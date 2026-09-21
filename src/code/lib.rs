@@ -208,8 +208,13 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let version = app.package_info().version.to_string();
-            let device_name =
-                std::env::var("USER").unwrap_or_else(|_| "Emby Theater".to_string());
+            // The machine's hostname is reported as the device name and
+            // "Emby Theater" as the app/client name (the web client would
+            // otherwise derive both from the browser user-agent and report
+            // e.g. "Safari" / "Emby Web").
+            let device_name = hostname::get()
+                .map(|h| h.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "Emby Theater".to_string());
             let did = device_id(&handle);
             std::thread::spawn(cec::reader_loop);
             // Start in the mode the user last chose in the client's settings
