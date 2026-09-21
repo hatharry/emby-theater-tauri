@@ -1,16 +1,17 @@
-# Clean-room amd64 build for the Emby Theater Tauri app: produces BOTH the
-# .deb (Ubuntu/Debian) and the .rpm (Fedora/RHEL/openSUSE) for x86_64.
+# Clean-room amd64 build for the Emby Theater Tauri app: produces the .deb
+# (Ubuntu/Debian), the .rpm (Fedora/RHEL/openSUSE) and the .AppImage
+# (distro-agnostic, self-contained) for x86_64.
 #
 # Tauri's RPM bundler is pure Rust (rpm-rs), so a single Debian-family image
-# emits a valid .rpm alongside the .deb — no rpmbuild or RPM distro needed.
-# The webkit2gtk/gtk runtime Requires are injected automatically by tauri-cli;
+# emits a valid .rpm alongside the .deb — no rpmbuild or RPM distro needed. The
+# webkit2gtk/gtk runtime Requires are injected automatically by tauri-cli;
 # the media/CEC deps come from bundle>linux>{deb,rpm}>depends in tauri.conf.json.
 #
 # Usage:
 #   docker build -f docker/Dockerfile.amd64 -t embytheater-amd64 .
 #   docker run --rm embytheater-amd64            # smoke test (installs the deb)
 #   docker run --rm -v "$PWD/out:/out" embytheater-amd64 bash -c \
-#       'cp /app/src/target/release/bundle/deb/*.deb /app/src/target/release/bundle/rpm/*.rpm /out/'
+#       'cp /app/src/target/release/bundle/{deb/*.deb,rpm/*.rpm,appimage/*.AppImage} /out/'
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -20,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates gnupg build-essential pkg-config \
     libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
     nodejs npm \
-    desktop-file-utils rpm2cpio cpio xvfb \
+    desktop-file-utils rpm2cpio cpio xvfb squashfs-tools patchelf file \
     && rm -rf /var/lib/apt/lists/*
 
 # Rust via rustup (native x86_64 toolchain)
@@ -30,8 +31,13 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 WORKDIR /app
 COPY . .
 
-# Build the release .deb and .rpm bundles (host arch is amd64 here).
-RUN npm install && npm run build:native -- --bundles deb,rpm
+# Build the release .deb, .rpm and .AppImage bundles (host arch is amd64
+# here). The AppImage is packaged by linuxdeploy, which the bundler downloads
+# on first use (needs network at build time) and runs with
+# APPIMAGE_EXTRACT_AND_RUN=1 — hence squashfs-tools above. bundleMediaFramework
+# in tauri.conf.json pulls this image's GStreamer plugins into the AppImage so
+# playback works on hosts without gstreamer installed.
+RUN npm install && npm run build:native -- --bundles deb,rpm,appimage
 
 # Verify the .deb by installing it, and the .rpm by extracting its payload
 # (rpm2cpio) — an RPM distro isn't needed just to check the file list.

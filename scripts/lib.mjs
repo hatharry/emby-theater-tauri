@@ -32,6 +32,7 @@ export const legs = {
     globs: [
       '/app/src/target/release/bundle/deb/*.deb',
       '/app/src/target/release/bundle/rpm/*.rpm',
+      '/app/src/target/release/bundle/appimage/*.AppImage',
     ],
   },
   arm64: {
