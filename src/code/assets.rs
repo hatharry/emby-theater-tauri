@@ -56,6 +56,11 @@ pub(crate) const SERVER_DISCOVERY_JS: &str = include_str!("./serverdiscovery.js"
 /// initialized, and appHost.init() would reject, leaving the splash screen up.
 pub(crate) const APPHOST_JS: &str = include_str!("./apphost.js");
 
+/// Forward-seek fix (see seekfix.js): reading mediaElement.seekable before the
+/// demuxer finishes its index scan aborts the scan; this plugin guards those
+/// reads. Loaded on every page; a no-op while the element is healthy.
+pub(crate) const SEEKFIX_JS: &str = include_str!("./seekfix.js");
+
 /// Host Wake-on-LAN module (same rationale as serverdiscovery: browsers cannot
 /// send UDP magic packets). `send(info)` receives the server's WakeInfo, whose
 /// MacAddress/Address/Port we forward to the native command.
@@ -91,6 +96,7 @@ pub(crate) fn response_for(path: &str) -> (&'static [u8], &'static str) {
     match path {
         "/wakeonlan.js" => (WAKE_ON_LAN_JS.as_bytes(), "application/javascript"),
         "/apphost.js" => (APPHOST_JS.as_bytes(), "application/javascript"),
+        "/seekfix.js" => (SEEKFIX_JS.as_bytes(), "application/javascript"),
         "/cec.js" => (CEC_JS.as_bytes(), "application/javascript"),
         "/cec/cec.js" => (CEC_PAGE_JS.as_bytes(), "application/javascript"),
         "/cec/cec.html" => (CEC_PAGE_HTML.as_bytes(), "text/html"),
@@ -107,7 +113,12 @@ pub(crate) fn response_for(path: &str) -> (&'static [u8], &'static str) {
 /// starts the app itself with that info. On the Pi it also registers the
 /// static device-profile plugin (see PI_DEVICE_PROFILE_JS) through the same
 /// plugin mechanism the official Theater apps use.
-pub(crate) fn startup_script(version: &str, did: &str, device_name: &str, is_pi: bool) -> String {
+pub(crate) fn startup_script(
+    version: &str,
+    did: &str,
+    device_name: &str,
+    is_pi: bool,
+) -> String {
     include_str!("./startup.js")
         .replace("{version}", version)
         .replace("{did}", did)
@@ -119,5 +130,9 @@ pub(crate) fn startup_script(version: &str, did: &str, device_name: &str, is_pi:
             } else {
                 ", \"embyhost://host/deviceprofiles/default.js\""
             },
+        )
+        .replace(
+            "{seekfix_plugin}",
+            ", \"embyhost://host/seekfix.js\"",
         )
 }

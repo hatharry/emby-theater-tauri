@@ -15,7 +15,7 @@ window.appStartInfo = Object.assign({
     wakeonlan: "embyhost://host/wakeonlan.js",
     apphost: "embyhost://host/apphost.js",
   },
-  plugins: ["embyhost://host/cec.js"{profile_plugin}],
+  plugins: ["embyhost://host/cec.js"{profile_plugin}{seekfix_plugin}],
 }, window.appStartInfo || {});
 (function startEmby() {
   if (window.Emby && window.Emby.App && typeof window.Emby.App.start === "function") {
