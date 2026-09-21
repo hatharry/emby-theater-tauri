@@ -22,33 +22,13 @@ pub(crate) fn has_nvidia_gpu() -> bool {
     }
 }
 
-/// True on a Raspberry Pi (device-tree compatible string). The Pi's V3D GPU
-/// combined with WebKitGTK's dmabuf renderer fails every page load with
-/// "internallyFailedLoadTimerFired" (WebLoaderStrategy.cpp), leaving the TV
-/// client stuck on its splash screen.
+/// True on a Raspberry Pi (device-tree compatible string). Used to select
+/// the Pi device profile and the GStreamer feature-rank fix for the broken
+/// vc4 stateless HEVC decoder (see lib.rs setup).
 pub(crate) fn is_raspberry_pi() -> bool {
     fs::read_to_string("/proc/device-tree/compatible")
         .map(|c| c.contains("raspberrypi"))
         .unwrap_or(false)
-}
-
-/// True when the linked WebKitGTK is older than `major.minor`.
-pub(crate) fn webkit_version_below(major: u32, minor: u32) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        let (a, b) = unsafe {
-            (
-                webkit2gtk::ffi::webkit_get_major_version(),
-                webkit2gtk::ffi::webkit_get_minor_version(),
-            )
-        };
-        return (a, b) < (major, minor);
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (major, minor);
-        false
-    }
 }
 
 /// WebKitGTK + NVIDIA: the first accelerated-compositing trigger on a page
@@ -78,21 +58,6 @@ pub(crate) fn apply_webkit_nvidia_workarounds() {
         if std::env::var_os(var).is_none() {
             std::env::set_var(var, value);
         }
-    }
-}
-
-/// Disabling the dmabuf renderer routes WebKit through shared memory, which
-/// loads fine on the older (2.48, 32-bit) Pi build where the dmabuf path fails
-/// page loads. Newer WebKitGTK (>= 2.50) renders correctly over dmabuf on the
-/// Pi's V3D GPU, and forcing SHM there is actively harmful: the shared-memory
-/// renderer leaves a null AcceleratedBackingStore that segfaults the UI process
-/// the first time a page transition enters accelerated compositing. So the
-/// workaround is applied only below 2.50. Must run before the webview spawns so
-/// the helper processes inherit the environment; respects pre-set values.
-pub(crate) fn apply_webkit_pi_workarounds() {
-    if webkit_version_below(2, 50) && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
-    {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 }
 

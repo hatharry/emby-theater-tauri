@@ -17,10 +17,7 @@ use std::fs;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 use assets::response_for;
-use platform::{
-    apply_webkit_nvidia_workarounds, apply_webkit_pi_workarounds, has_nvidia_gpu,
-    is_raspberry_pi, webkit_version_below,
-};
+use platform::{apply_webkit_nvidia_workarounds, has_nvidia_gpu, is_raspberry_pi};
 
 /// Emby Theater TV web client with autostart disabled; startup parameters are
 /// supplied through the injected `window.appStartInfo` object (runs before page
@@ -153,11 +150,7 @@ fn set_layout_mode(app: tauri::AppHandle, mode: String) {
     let restart_for_nvidia = fullscreen
         && has_nvidia_gpu()
         && std::env::var_os("WEBKIT_DMABUF_RENDERER_FORCE_SHM").is_none();
-    let restart_for_pi = fullscreen
-        && is_raspberry_pi()
-        && webkit_version_below(2, 50)
-        && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none();
-    if restart_for_nvidia || restart_for_pi {
+    if restart_for_nvidia {
         // Switching into TV mode at runtime: the crash workarounds must be in
         // the environment before the webview spawns, so relaunch (the new
         // process reads the persisted "tv" mode and applies them).
@@ -240,10 +233,6 @@ pub fn run() {
                         );
                     }
                     _ => std::env::set_var("GST_PLUGIN_FEATURE_RANK", "v4l2slh265dec:0"),
-                }
-                // The dmabuf workaround is only reachable in the TV layout.
-                if fullscreen {
-                    apply_webkit_pi_workarounds();
                 }
             }
             if fullscreen && has_nvidia_gpu() {
