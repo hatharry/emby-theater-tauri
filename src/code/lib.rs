@@ -17,7 +17,10 @@ use std::fs;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 use assets::response_for;
-use platform::{apply_webkit_nvidia_workarounds, has_nvidia_gpu, is_raspberry_pi};
+use platform::{
+    apply_appimage_workarounds, apply_webkit_nvidia_workarounds, has_nvidia_gpu,
+    is_raspberry_pi,
+};
 
 /// Emby Theater TV web client with autostart disabled; startup parameters are
 /// supplied through the injected `window.appStartInfo` object (runs before page
@@ -176,6 +179,11 @@ fn set_layout_mode(app: tauri::AppHandle, mode: String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // AppImage builds ship an older glib than recent distros; without this
+    // the host's gvfs GIO modules fail to load against it. Must run before
+    // GTK initialization (which happens inside Builder::run), not in the
+    // setup hook.
+    apply_appimage_workarounds();
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             emby_url,

@@ -31,6 +31,31 @@ pub(crate) fn is_raspberry_pi() -> bool {
         .unwrap_or(false)
 }
 
+/// Running from an AppImage (AppRun exports APPDIR): the bundled glib is
+/// pinned to the build image's (Ubuntu 24.04, glib 2.80), but GIO still scans
+/// the HOST's module directory, where gvfs modules built against a newer glib
+/// fail with "undefined symbol: g_variant_builder_init_static" on distros
+/// like Ubuntu 26.04. Pointing GIO_MODULE_DIR at the AppDir's own modules
+/// (which linuxdeploy's gtk hook already populated) replaces the default
+/// search path, so host modules are never loaded. Must run before GTK
+/// initialization — GIO scans the module dirs while GTK loads its modules,
+/// which happens inside Builder::run, before the setup hook.
+pub(crate) fn apply_appimage_workarounds() {
+    let Some(appdir) = std::env::var_os("APPDIR") else {
+        return;
+    };
+    for arch in ["x86_64-linux-gnu", "aarch64-linux-gnu"] {
+        let modules = std::path::Path::new(&appdir)
+            .join("usr/lib")
+            .join(arch)
+            .join("gio/modules");
+        if modules.is_dir() && std::env::var_os("GIO_MODULE_DIR").is_none() {
+            std::env::set_var("GIO_MODULE_DIR", modules);
+            return;
+        }
+    }
+}
+
 /// WebKitGTK + NVIDIA: the first accelerated-compositing trigger on a page
 /// (e.g. the TV client's page-transition animation when a menu item is
 /// clicked) segfaults the UI process on a null AcceleratedBackingStore —
